@@ -121,3 +121,5 @@ div.scimg{display:flex;align-items:center;justify-content:center;text-align:cent
 .rul{margin-top:8px;font-size:13px}.rulrow{margin:5px 0;padding-left:8px;border-left:2px solid var(--line)}
 select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;margin:2px 4px 2px 0;max-width:100%}
 #colq{padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);font:inherit}
+
+.cmts{margin-top:6px}.cmt{font-size:13px;margin:3px 0;padding-left:8px;border-left:2px solid var(--line)}

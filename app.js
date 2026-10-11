@@ -10,7 +10,7 @@
     idx: null, rows: [], csvName: "", own: new Map(), decks: [], claims: { hard: new Map(), soft: new Map() },
     wtoken: "", who: "", statsOpen: false, statsMode: "swaps", statsRole: "", dview: "stacks", zoom: null, rul: {}, col: { view: "binders", layout: "grid", q: "", colors: new Set(), cmode: "any", ci: new Set(), ciDeck: "", mv: new Set(), types: new Set(), rarity: new Set(), set: "", binder: "", foil: "", sort: "name", dir: 1, limit: 120, open: false }, saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
   };
-  try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; S.dview = localStorage.getItem("mtg_dview") || "stacks"; } catch (e) { /* storage blocked */ }
+  try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; S.dview = localStorage.getItem("mtg_dview") || "stacks"; S.reviewer = localStorage.getItem("mtg_reviewer") === "1"; } catch (e) { /* storage blocked */ }
 
   /* ---------- phone back button: closes pop-ups, then leaves the deck ---------- */
   S.nav = []; S.ignorePop = 0;
@@ -201,6 +201,20 @@
   }
   // "Sol Ring // Sol Ring" (same name both sides in the DB) -> "Sol Ring"
   const plain = (k) => { const p = String(k).split(" // "); return p.length === 2 && norm(p[0]) === norm(p[1]) ? p[0] : k; };
+  function ensureWho() {
+    if (S.who) return true;
+    const n = (prompt("Your name? (shown on swaps and comments so we know who did what)", "") || "").trim();
+    if (!n) return false;
+    S.who = n; try { localStorage.setItem("mtg_who", n); } catch (e) { /* ignore */ }
+    return true;
+  }
+  const swapAuthor = (p) => p.by || ((p.log && p.log[0] && p.log[0].by) || "");
+  const needsReview = (p) => { const au = swapAuthor(p); return M.pencilStatus(p) === "pencilled" && au && au !== "me" && norm(au) !== norm(S.who) && !p.reviewed; };
+  function reviewQueue() {
+    const out = [];
+    for (const d of S.decks) for (const p of d.pencilled || []) if (needsReview(p)) out.push({ d, p });
+    return out;
+  }
   async function addSwap(slug, pre) {
     const d = deckBySlug(slug);
     if (!d || !S.wtoken) return;
@@ -215,8 +229,10 @@
       if (!ko || !M.deckMap(d, S.idx).has(ko)) { S.error = `"${out}" isn't in this deck's list (nothing saved).`; render(); return; }
     }
     if (!confirm(`Add a pencilled swap to ${d.name}?\n\nIN: ${ki}\nOUT: ${ko || "undecided"}`)) return;
+    if (!ensureWho()) return;
+    const why = (prompt("Why this swap? (optional — leave blank to skip)", "") || "").trim(), today = new Date().toISOString().slice(0, 10);
     d.pencilled = d.pencilled || [];
-    d.pencilled.push({ out: plain(ko), in: plain(ki), status: "pencilled", note: "", log: [{ at: new Date().toISOString().slice(0, 10), by: S.who || "me", act: "Added" }] });
+    d.pencilled.push({ out: plain(ko), in: plain(ki), status: "pencilled", note: "", by: S.who, comments: why ? [{ at: today, by: S.who, text: why }] : [], log: [{ at: today, by: S.who, act: "Added" }] });
     S.error = ""; S.saving = "Saving…"; render();
     try { await saveDeck(d, `Swap (${d.name || d.slug}): Added ${ki}${ko ? " for " + ko : ""}${S.who ? " [" + S.who + "]" : ""}`); S.saving = ""; recompute(); }
     catch (e) { d.pencilled.pop(); S.error = e.message; S.saving = ""; }
@@ -229,7 +245,12 @@
     const label = (p.in || "?") + (p.out ? " for " + p.out : "");
     const status0 = p.status || "pencilled";
     let msg = "", entry = null;
-    if (act === "undo") {
+    if (act === "comment") {
+      if (!ensureWho()) return;
+      const tx = (prompt(`Comment on ${label}`, "") || "").trim();
+      if (!tx) return;
+      p.comments = (p.comments || []).concat({ at, by: S.who, text: tx }); msg = "Comment";
+    } else if (act === "undo") {
       const k = lastUndo(p);
       if (k < 0) return;
       const e = p.log[k];
@@ -239,6 +260,7 @@
       if (e.fromOut !== undefined) p.out = e.fromOut;
       if (e.noteBefore !== undefined) p.note = e.noteBefore;
       p.log = p.log.filter((_, n) => n !== k);
+      if (p.status === "pencilled") delete p.reviewed;
       msg = "Undid: " + e.act;
     } else if (act === "changeout") {
       const nm = (arg || prompt("Which card goes OUT? (exact name from this deck)", "") || "").trim();
@@ -268,6 +290,7 @@
       p.status = { approve: "approved", made: "made", done: "done", cancel: "dropped" }[act];
       msg = { approve: "Approved", made: "Made by hand", done: "Marked done", cancel: "Cancelled" }[act];
       entry = { at, by, act: msg, prev: status0 };
+      if (S.who) p.reviewed = { by: S.who, at };
     }
     if (entry) p.log = (p.log || []).concat(entry);
     S.error = ""; S.saving = "Saving…"; render();
@@ -358,7 +381,9 @@
   function vDecks() {
     if (S.deck) return vDeck(deckBySlug(S.deck));
     if (!S.decks.length) return emptyMsg("No decks loaded yet.");
-    return `<div class="tiles">` + S.decks.map((d) => {
+    const rq = reviewQueue();
+    const rbox = rq.length && S.reviewer ? `<div class="card"><b>Swaps to review (${rq.length})</b>${rq.map(({ d, p }) => `<div class="row" data-act="open" data-slug="${esc(d.slug)}" style="cursor:pointer"><span>${esc(d.name || d.slug)}: <b>${esc(p.in || "?")}</b>${p.out ? " for " + esc(p.out) : ""}<div class="muted">${esc(swapAuthor(p))}${(p.comments || []).length ? " — " + esc(p.comments[0].text) : ""}</div></span><span class="muted">open →</span></div>`).join("")}</div>` : "";
+    return rbox + `<div class="tiles">` + S.decks.map((d) => {
       const m = M.deckMap(d, S.idx), tot = M.deckTotal(m), is = issuesFor(d.slug);
       const er = is.filter((i) => i.level === "error").length, wa = is.filter((i) => i.level === "warn").length;
       const act = M.activePencils(d), mm = new Map();
@@ -368,7 +393,7 @@
       const cm = M.commandersOf(d);
       return `<div class="tile" data-act="open" data-slug="${esc(d.slug)}">${cm.length ? artImg(M.keyOf(S.idx, cm[0]), cm[0], d, "art_crop", "tileimg") : ""}<div class="tilein"><div class="row"><b>${esc(d.name || d.slug)}</b><span class="pill">${esc(d.status || "planned")}</span></div>
         <div class="muted">${esc(cm.join(" + "))} · ${tot} cards</div>
-        <div>${todo ? `<span class="pill todo">${todo} to do in ManaBox</span> ` : ""}${pc ? `<span class="pill pencil">${pc} pencilled</span> ` : ""}${er ? `<span class="pill err">${er} errors</span> ` : ""}${wa ? `<span class="pill warn">${wa} warnings</span> ` : ""}${wn ? `<span class="pill">${wn} on wishlist</span>` : ""}</div></div></div>`;
+        <div>${todo ? `<span class="pill todo">${todo} to do in ManaBox</span> ` : ""}${pc ? `<span class="pill pencil">${pc} pencilled</span> ` : ""}${er ? `<span class="pill err">${er} errors</span> ` : ""}${wa ? `<span class="pill warn">${wa} warnings</span> ` : ""}${wn ? `<span class="pill">${wn} on wishlist</span>` : ""}${S.reviewer && (d.pencilled || []).some(needsReview) ? ` <span class="pill todo">swap to review</span>` : ""}</div></div></div>`;
     }).join("") + `</div>`;
   }
 
@@ -474,15 +499,17 @@
     const swapBlock = (list, cls) => list.map((p) => {
       const i = (d.pencilled || []).indexOf(p), st = M.pencilStatus(p);
       const und = lastUndo(p) >= 0 ? btn(i, "undo", "Undo last change", 1) : "";
-      const btns = !S.wtoken ? "" : st === "made" ? btn(i, "done", "Mark done") + btn(i, "change", "Different card", 1) + btn(i, "cancel", "Cancel", 1) + und
-        : (st === "approved" ? "" : btn(i, "approve", "Approve")) + btn(i, "made", "I made it") + btn(i, "change", "Different IN card", 1) + btn(i, "changeout", p.out ? "Change cut" : "Choose cut", 1) + btn(i, "cancel", "Cancel", 1) + und;
-      let x = `<div class="card"><span class="pill ${cls}">${esc(p.status || "pencilled")}</span> ${p.note ? `<span class="muted">${esc(p.note)}</span>` : ""}`;
+      const btns = !S.wtoken ? "" : st === "made" ? btn(i, "done", "Mark done") + btn(i, "change", "Different card", 1) + btn(i, "cancel", "Cancel", 1) + und + btn(i, "comment", "Comment", 1)
+        : (st === "approved" ? "" : btn(i, "approve", "Approve")) + btn(i, "made", "I made it") + btn(i, "change", "Different IN card", 1) + btn(i, "changeout", p.out ? "Change cut" : "Choose cut", 1) + btn(i, "cancel", "Cancel", 1) + und + btn(i, "comment", "Comment", 1);
+      const au = swapAuthor(p), rv = needsReview(p);
+      let x = `<div class="card"><span class="pill ${cls}">${esc(p.status || "pencilled")}</span> ${au && au !== "me" ? `<span class="muted">added by ${esc(au)}</span> ` : ""}${rv ? (S.reviewer ? `<span class="pill todo">needs your review</span> ` : `<span class="pill">awaiting review</span> `) : p.reviewed && p.reviewed.by && norm(p.reviewed.by) !== norm(au) ? `<span class="muted">reviewed by ${esc(p.reviewed.by)}</span> ` : ""}${p.note ? `<span class="muted">${esc(p.note)}</span>` : ""}`;
       const side = (nm, role) => {
         if (!nm) return `<div class="sc empty"><div class="scimg">${role === "out" ? "Cut not chosen yet" : "No card"}</div><div class="scl">${role.toUpperCase()}</div></div>`;
         const k = M.keyOf(S.idx, nm);
         return `<div data-hold class="sc ${role}" data-act="zoom" data-key="${esc(k)}" data-slug="${esc(d.slug)}">${artImg(k, nm, d, "normal", "scimg")}<div class="scl"><span class="tagl ${role}">${role.toUpperCase()}</span> ${esc(nm)}</div>${role === "in" ? `<div>${ownPill(k, true)}</div>` : ""}</div>`;
       };
       x += `<div class="swapcards">${side(p.out, "out")}<div class="arrow">→</div>${side(p.in, "in")}</div>`;
+      if ((p.comments || []).length) x += `<div class="cmts">${p.comments.map((c) => `<div class="cmt"><span class="muted">${esc(c.by || "")} · ${esc(c.at || "")}</span> ${esc(c.text)}</div>`).join("")}</div>`;
       return x + (btns ? `<div>${btns}</div>` : "") + `</div>`;
     }).join("");
     const mades = pens.filter((p) => M.pencilStatus(p) === "made"), pencils = pens.filter((p) => M.pencilStatus(p) !== "made");
@@ -738,6 +765,7 @@
     h += `<h2>Saving changes</h2><div class="card"><div class="muted">Optional. A second fine-grained token with <b>Contents: read and write</b>, only <b>${esc(S.cfg.dataRepo)}</b>. Lets the swap buttons save to the repo. Stored in this browser only.</div>
       <input type="password" id="wtok" placeholder="github_pat_… (write)" autocomplete="off" value="${esc(S.wtoken)}">
       <input type="text" id="who" placeholder="Your name (shown in the swap log)" value="${esc(S.who)}" style="margin-top:6px">
+      <label class="muted" style="display:block;margin-top:6px"><input type="checkbox" id="isrev" ${S.reviewer ? "checked" : ""}> I review swaps other people add (shows a "to review" list)</label>
       <button class="btn" data-act="savewtok">Save</button>${S.wtoken ? `<button class="btn alt" data-act="forgetw">Forget write token</button>` : ""}</div>`;
     if (S.wtoken) h += `<h2>Update collection</h2><div class="card"><div class="muted">Pick a fresh ManaBox collection CSV. It replaces <b>collection/ManaBox_Collection.csv</b> in the data repo for everyone using it.</div><input type="file" id="upcsv" accept=".csv"></div>`;
     h += reconCard();
@@ -945,6 +973,7 @@
       }
       render();
     }
+    else if (ev.target.id === "isrev") { S.reviewer = ev.target.checked; try { localStorage.setItem("mtg_reviewer", S.reviewer ? "1" : "0"); } catch (e) { /* ignore */ } }
     else if (ev.target.id === "reserve") { S.reserve = Math.max(0, parseInt(ev.target.value, 10) || 0); S.picked = null; render(); }
     else if (ev.target.id === "upcsv") { const f = ev.target.files[0]; if (f) uploadCollection(f); }
     else if (ev.target.id === "local") {
