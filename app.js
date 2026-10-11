@@ -58,7 +58,7 @@
       try { S.wl = JSON.parse(await gh("wishlist.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.wl = []; }
       const csvs = (await ghList("collection")).filter((f) => f.type === "file" && /\.csv$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name));
       let text = "", name = "";
-      if (csvs.length) { name = csvs[csvs.length - 1].name; text = await gh("collection/" + name, true); }
+      if (csvs.length) { const fixed = csvs.find((f) => f.name === "ManaBox_Collection.csv"); name = (fixed || csvs[csvs.length - 1]).name; text = await gh("collection/" + name, true); }
       await dbP;
       if (text) { S.rows = M.parseCollection(text); S.csvName = name; }
       S.log.push(`Decks found: ${S.decks.length}` + (deckFiles.length ? "" : " (no .json files in decks/)"));
@@ -91,6 +91,35 @@
     if (!r.ok) throw new Error("Save failed: GitHub " + r.status);
     const j = await r.json();
     d._sha = j.content.sha; d.updated = body.updated; d._orig = JSON.parse(JSON.stringify(d.pencilled || []));
+  }
+  const CSV_PATH = "collection/ManaBox_Collection.csv";
+  async function uploadCollection(file) {
+    S.error = ""; S.saving = "Reading CSV…"; render();
+    try {
+      if (!S.wtoken) throw new Error("Uploading needs the write token — add it above.");
+      if (!S.idx) await loadDB();
+      const text = await file.text();
+      const head = text.split(/\r?\n/, 1)[0] || "";
+      for (const col of ["Binder Name", "Name", "Scryfall ID", "Quantity"]) if (!head.includes(col)) throw new Error(`That doesn't look like a ManaBox collection export (no "${col}" column). Nothing uploaded.`);
+      const rows = M.parseCollection(text);
+      if (!rows.length) throw new Error("The CSV has no cards. Nothing uploaded.");
+      const oldN = S.rows.length;
+      if (oldN && rows.length < oldN * 0.8 && !confirm(`The new file has ${rows.length} rows but the current one has ${oldN}. Upload anyway?`)) { S.saving = ""; render(); return; }
+      const base = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/`;
+      const H = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
+      S.saving = "Uploading…"; render();
+      const lr = await fetch(base + "collection?ref=" + encodeURIComponent(S.cfg.branch), { headers: H });
+      if (lr.status === 401 || lr.status === 403 || lr.status === 404) throw new Error("GitHub refused (" + lr.status + ") — the write token needs Contents: read and write on " + S.cfg.dataRepo + ".");
+      const files = lr.ok ? await lr.json() : [];
+      const ex = files.find((f) => f.name === "ManaBox_Collection.csv");
+      const pr = await fetch(base + CSV_PATH, { method: "PUT", headers: H, body: JSON.stringify({
+        message: `Collection update: ${file.name} (${rows.length} rows)${S.who ? " [" + S.who + "]" : ""}`, content: b64(text), sha: ex ? ex.sha : undefined, branch: S.cfg.branch }) });
+      if (!pr.ok) throw new Error("Upload failed: GitHub " + pr.status);
+      S.rows = rows; S.csvName = "ManaBox_Collection.csv";
+      S.log.push(`Uploaded ${file.name}: ${rows.length} rows (was ${oldN})`);
+      S.saving = ""; recompute();
+    } catch (e) { S.error = e.message; S.saving = ""; }
+    status(); render();
   }
   async function swapAction(slug, i, act) {
     const d = deckBySlug(slug), p = d && (d.pencilled || [])[i];
@@ -313,6 +342,7 @@
       <input type="password" id="wtok" placeholder="github_pat_… (write)" autocomplete="off" value="${esc(S.wtoken)}">
       <input type="text" id="who" placeholder="Your name (shown in the swap log)" value="${esc(S.who)}" style="margin-top:6px">
       <button class="btn" data-act="savewtok">Save</button>${S.wtoken ? `<button class="btn alt" data-act="forgetw">Forget write token</button>` : ""}</div>`;
+    if (S.wtoken) h += `<h2>Update collection</h2><div class="card"><div class="muted">Pick a fresh ManaBox collection CSV. It replaces <b>collection/ManaBox_Collection.csv</b> in the data repo for everyone using it.</div><input type="file" id="upcsv" accept=".csv"></div>`;
     if (S.log.length) h += `<div class="card muted">${S.log.map(esc).join("<br>")}</div>`;
     h += `<h2>Load local files</h2><div class="card"><div class="muted">Try things without the token: pick a ManaBox CSV and/or deck JSON files. Nothing leaves your device.</div>
       <input type="file" id="local" multiple accept=".csv,.json"></div>`;
@@ -384,6 +414,7 @@
   });
   document.addEventListener("change", async (ev) => {
     if (ev.target.id === "reserve") { S.reserve = Math.max(0, parseInt(ev.target.value, 10) || 0); S.picked = null; render(); }
+    else if (ev.target.id === "upcsv") { const f = ev.target.files[0]; if (f) uploadCollection(f); }
     else if (ev.target.id === "local") {
       S.error = "";
       try {
