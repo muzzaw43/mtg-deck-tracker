@@ -480,7 +480,7 @@
       const side = (nm, role) => {
         if (!nm) return `<div class="sc empty"><div class="scimg">${role === "out" ? "Cut not chosen yet" : "No card"}</div><div class="scl">${role.toUpperCase()}</div></div>`;
         const k = M.keyOf(S.idx, nm);
-        return `<div class="sc ${role}" data-act="zoom" data-key="${esc(k)}" data-slug="${esc(d.slug)}">${artImg(k, nm, d, "normal", "scimg")}<div class="scl"><span class="tagl ${role}">${role.toUpperCase()}</span> ${esc(nm)}</div>${role === "in" ? `<div>${ownPill(k, true)}</div>` : ""}</div>`;
+        return `<div data-hold class="sc ${role}" data-act="zoom" data-key="${esc(k)}" data-slug="${esc(d.slug)}">${artImg(k, nm, d, "normal", "scimg")}<div class="scl"><span class="tagl ${role}">${role.toUpperCase()}</span> ${esc(nm)}</div>${role === "in" ? `<div>${ownPill(k, true)}</div>` : ""}</div>`;
       };
       x += `<div class="swapcards">${side(p.out, "out")}<div class="arrow">→</div>${side(p.in, "in")}</div>`;
       return x + (btns ? `<div>${btns}</div>` : "") + `</div>`;
@@ -524,7 +524,7 @@
     } else {
       const tile = (x, last) => {
         const out = outKeys.has(x.k), miss = S.rows.length && !M.isBasic(x.e.name) && !S.own.get(x.k) && norm(d.status) === "built";
-        return `<div class="ac${view === "grid" || last ? " full" : ""}${out ? " out" : ""}" data-act="zoom" data-key="${esc(x.k)}" data-slug="${esc(d.slug)}">${artImg(x.k, x.e.name, d, "normal", "acimg")}${x.e.qty > 1 ? `<span class="qty">${x.e.qty}×</span>` : ""}${out ? `<span class="tag out">OUT</span>` : ""}${miss ? `<span class="tag miss">not in CSV</span>` : ""}</div>`;
+        return `<div data-hold class="ac${view === "grid" || last ? " full" : ""}${out ? " out" : ""}" data-act="zoom" data-key="${esc(x.k)}" data-slug="${esc(d.slug)}">${artImg(x.k, x.e.name, d, "normal", "acimg")}${x.e.qty > 1 ? `<span class="qty">${x.e.qty}×</span>` : ""}${out ? `<span class="tag out">OUT</span>` : ""}${miss ? `<span class="tag miss">not in CSV</span>` : ""}</div>`;
       };
       cards += `<div class="${view === "grid" ? "gridv" : "stacks"}">`;
       for (const g of TYPE_ORDER) {
@@ -726,11 +726,11 @@
   });
   document.addEventListener("touchstart", (ev) => {
     S.lastTouch = Date.now();
-    const t = ev.target.closest && ev.target.closest("[data-peek]");
+    const t = ev.target.closest && ev.target.closest("[data-peek],[data-hold]");
     if (!t) return;
     const p = ev.touches[0]; startXY = [p.clientX, p.clientY]; holdShown = false;
     clearTimeout(holdTimer);
-    holdTimer = setTimeout(() => { holdShown = true; peek.className = "touch"; peek.style.left = ""; peek.style.top = ""; peekShow(t.dataset.peek); }, 350);
+    holdTimer = setTimeout(() => { holdShown = true; peek.className = "touch"; peek.style.left = ""; peek.style.top = ""; peekShow(t.dataset.peek || t.dataset.key); }, 350);
   }, { passive: true });
   document.addEventListener("touchmove", (ev) => {
     if (!startXY || holdShown) return;
