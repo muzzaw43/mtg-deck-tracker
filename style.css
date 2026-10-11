@@ -123,3 +123,5 @@ select{background:var(--panel);color:var(--text);border:1px solid var(--line);bo
 #colq{padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);font:inherit}
 
 .cmts{margin-top:6px}.cmt{font-size:13px;margin:3px 0;padding-left:8px;border-left:2px solid var(--line)}
+
+tr.flag td{background:rgba(230,180,80,.16)}

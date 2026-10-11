@@ -57,7 +57,7 @@
       binder: col("Binder Name"), btype: col("Binder Type"), name: col("Name"),
       set: col("Set code"), cn: col("Collector number"), foil: col("Foil"),
       qty: col("Quantity"), sid: col("Scryfall ID"), price: col("Purchase price"),
-      setName: col("Set name"), rarity: col("Rarity"), mbid: col("ManaBox ID"), cond: col("Condition"), lang: col("Language"),
+      setName: col("Set name"), cur: col("Purchase price currency"), rarity: col("Rarity"), mbid: col("ManaBox ID"), cond: col("Condition"), lang: col("Language"),
     };
     if (c.name < 0 || c.qty < 0)
       throw new Error("This doesn't look like a ManaBox export (needs Name and Quantity columns).");
@@ -71,7 +71,7 @@
       foil: get(r, c.foil),
       qty: parseInt(get(r, c.qty), 10) || 0,
       sid: get(r, c.sid),
-      price: get(r, c.price),
+      price: get(r, c.price), cur: get(r, c.cur),
       setName: get(r, c.setName), rarity: get(r, c.rarity), mbid: get(r, c.mbid), cond: get(r, c.cond), lang: get(r, c.lang),
     })).filter((x) => x.name && x.qty > 0);
   }
@@ -360,6 +360,8 @@
   }
 
   /* ---------- Trades ---------- */
+  const RARS = ["common", "uncommon", "rare", "mythic"];
+  const rowAUD = (r) => { const v = parseFloat(r.price); return isFinite(v) && v >= 0 && (!r.cur || /^AUD$/i.test(r.cur)) && String(r.price).trim() !== "" ? v : null; };
   function buildTrades(ctx, reserve) {
     const { own, claims, cfg, idx } = ctx;
     const free = new Set(cfg.freeBinders.map(norm)), multi = new Set(cfg.multiCopyBinders.map(norm));
@@ -367,7 +369,9 @@
     for (const o of own.values()) {
       if (isBasic(o.name)) continue;
       const hard = sumQty(claims.hard.get(o.key)), soft = sumQty(claims.soft.get(o.key));
-      const t = Math.max(0, Math.min(o.free, o.total - hard - soft) - (reserve || 0));
+      const rar = o.rows.reduce((b, r) => (RARS.indexOf((r.rarity || "").toLowerCase()) > RARS.indexOf(b) ? (r.rarity || "").toLowerCase() : b), "common");
+      const keep = typeof reserve === "object" && reserve ? (reserve[rar] || 0) : (reserve || 0);
+      const t = Math.max(0, Math.min(o.free, o.total - hard - soft) - keep);
       if (t <= 0) continue;
       // allocate across the rows that sit in free binders
       let left = t;
@@ -386,7 +390,11 @@
         const take = Math.min(avail, left);
         if (take > 0) { alloc.push({ ...r, qty: take }); left -= take; }
       }
-      res.push({ key: o.key, name: o.name, total: o.total, free: o.free, hard, soft, tradeable: t, alloc, info: cardInfo(idx, o.key) });
+      let val = 0, priced = 0;
+      for (const r of alloc) { const p = rowAUD(r); if (p != null) { val += p * r.qty; priced += r.qty; } }
+      const committed = Math.min(o.total, hard + soft);
+      res.push({ key: o.key, name: o.name, total: o.total, free: o.free, hard, soft, tradeable: t, alloc, info: cardInfo(idx, o.key), rarity: rar, keep,
+        committed, uncommitted: Math.max(0, o.total - committed), unit: priced ? val / priced : null, value: priced ? val : null });
     }
     res.sort((a, b) => a.name.localeCompare(b.name));
     return res;
@@ -735,7 +743,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;

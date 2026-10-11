@@ -8,7 +8,7 @@
   const S = {
     tab: "decks", deck: null, token: "", cfg: { ...M.DEFAULT_CONFIG },
     idx: null, rows: [], csvName: "", own: new Map(), decks: [], claims: { hard: new Map(), soft: new Map() },
-    wtoken: "", who: "", statsOpen: false, statsMode: "swaps", statsRole: "", dview: "stacks", zoom: null, rul: {}, col: { view: "binders", layout: "grid", q: "", colors: new Set(), cmode: "any", ci: new Set(), ciDeck: "", mv: new Set(), types: new Set(), rarity: new Set(), set: "", binder: "", foil: "", sort: "name", dir: 1, limit: 120, open: false }, saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
+    wtoken: "", who: "", statsOpen: false, statsMode: "swaps", statsRole: "", dview: "stacks", zoom: null, rul: {}, col: { view: "binders", layout: "grid", q: "", colors: new Set(), cmode: "any", ci: new Set(), ciDeck: "", mv: new Set(), types: new Set(), rarity: new Set(), set: "", binder: "", foil: "", sort: "name", dir: 1, limit: 120, open: false }, saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, reserveBy: { common: 0, uncommon: 0, rare: 0, mythic: 0 }, minPrice: 0, flagPrice: 0, showCommitted: false, picked: null, out: null, error: "", busy: "", dbCount: 0,
   };
   try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; S.dview = localStorage.getItem("mtg_dview") || "stacks"; S.reviewer = localStorage.getItem("mtg_reviewer") === "1"; } catch (e) { /* storage blocked */ }
 
@@ -719,19 +719,24 @@
       else parts.push(`${q} locked in ${b}`);
     }
     if (x.soft) parts.push(`${x.soft} wanted by a planned or pencilled deck`);
-    if (S.reserve) parts.push(`${S.reserve} kept by your reserve setting`);
+    if (x.keep) parts.push(`${x.keep} kept back (${x.rarity} spares setting)`);
     return parts.join(" · ");
   }
   function vTrades() {
     if (!S.rows.length) return emptyMsg("Load a collection CSV first.");
-    const t = M.buildTrades({ own: S.own, claims: S.claims, cfg: S.cfg, idx: S.idx }, S.reserve);
+    const t = M.buildTrades({ own: S.own, claims: S.claims, cfg: S.cfg, idx: S.idx }, S.reserveBy).filter((x) => !(S.minPrice > 0) || (x.unit != null && x.unit >= S.minPrice));
     if (!S.picked) S.picked = new Set(t.map((x) => x.key));
     let h = `<h2>Trade candidates</h2><div class="muted">Spare copies in your free binders that no deck (built, planned or pencilled in) needs. Basics are skipped. In "The Hobbit" and "Avatar" the first copy of a card stays put, so only extras count. Cards you own more of than the Spare number show why underneath.</div>
-      <div class="row" style="margin-top:8px"><span>Keep this many spares of each</span><input type="number" min="0" value="${S.reserve}" id="reserve" style="width:70px"></div>`;
+      <div class="card"><div class="muted">Spares to keep back of each card, by rarity</div><div class="row">${M.RARS.map((r) => `<label class="muted">${r}<br><input type="number" min="0" value="${S.reserveBy[r]}" data-rs="${r}" style="width:64px"></label>`).join("")}</div>
+      <div class="row" style="margin-top:8px"><label class="muted">Only show cards worth at least (AUD)<br><input type="number" min="0" step="0.5" value="${S.minPrice || ""}" id="minprice" placeholder="0" style="width:90px"></label>
+        <label class="muted">Flag cards worth at least (AUD)<br><input type="number" min="0" step="0.5" value="${S.flagPrice || ""}" id="flagprice" placeholder="off" style="width:90px"></label></div>
+      <label class="muted" style="display:block;margin-top:8px"><input type="checkbox" id="showcommitted" ${S.showCommitted ? "checked" : ""}> Show a "In decks" column — and make Own count only the copies not committed to a deck</label>
+      <div class="muted">Prices are what ManaBox has on each card in AUD (the price when you added it), not live market prices. Cards with no price are hidden when a minimum is set.</div></div>`;
     if (!t.length) return h + `<div class="card">Nothing spare right now.</div>`;
     h += `<div><button class="btn" data-act="tradecsv">Export ManaBox CSV</button><button class="btn alt" data-act="tradetext">Export text list</button><button class="btn alt" data-act="tradeall">${S.picked.size === t.length ? "Untick all" : "Tick all"}</button></div>
-      <table><tr><th></th><th>Card</th><th>Spare</th><th>Own</th></tr>` +
-      t.map((x) => `<tr><td><input type="checkbox" data-act="pick" data-key="${esc(x.key)}" ${S.picked.has(x.key) ? "checked" : ""}></td><td>${x.alloc[0] && x.alloc[0].sid ? `<img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(x.alloc[0].sid))}">` : ""}${esc(x.name)}${keepReason(x) ? `<div class="muted">${esc(keepReason(x))}</div>` : ""}</td><td>${x.tradeable}</td><td class="muted">${x.total}</td></tr>`).join("") + `</table>`;
+      <div class="muted" style="margin:6px 0">${t.length} cards · ${t.reduce((s, x) => s + x.tradeable, 0)} spare copies · about $${t.reduce((s, x) => s + (x.value || 0), 0).toFixed(2)} AUD in total. Ticked: ${t.filter((x) => S.picked.has(x.key)).length} cards, about $${t.filter((x) => S.picked.has(x.key)).reduce((s, x) => s + (x.value || 0), 0).toFixed(2)} AUD.</div>
+      <table><tr><th></th><th>Card</th><th>Spare</th><th>Own</th>${S.showCommitted ? "<th>In decks</th>" : ""}<th>Price</th></tr>` +
+      t.map((x) => `<tr class="${S.flagPrice > 0 && x.unit != null && x.unit >= S.flagPrice ? "flag" : ""}"><td><input type="checkbox" data-act="pick" data-key="${esc(x.key)}" ${S.picked.has(x.key) ? "checked" : ""}></td><td>${x.alloc[0] && x.alloc[0].sid ? `<img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(x.alloc[0].sid))}">` : ""}${esc(x.name)}${keepReason(x) ? `<div class="muted">${esc(keepReason(x))}</div>` : ""}</td><td>${x.tradeable}</td><td class="muted">${S.showCommitted ? x.uncommitted : x.total}</td>${S.showCommitted ? `<td class="muted">${x.committed}</td>` : ""}<td>${x.unit != null ? (S.flagPrice > 0 && x.unit >= S.flagPrice ? "★ " : "") + "$" + x.unit.toFixed(2) + (x.tradeable > 1 ? `<div class="muted">$${x.value.toFixed(2)} total</div>` : "") : `<span class="muted">—</span>`}</td></tr>`).join("") + `</table>`;
     S._trades = t;
     return h;
   }
@@ -886,7 +891,7 @@
       else showOut("Trade binder — text list", M.tradesText(sel), "trade_binder.txt");
     }
     else if (a === "tradeall") { const t = S._trades || []; S.picked = S.picked.size === t.length ? new Set() : new Set(t.map((x) => x.key)); render(); }
-    else if (a === "pick") { el.checked ? S.picked.add(el.dataset.key) : S.picked.delete(el.dataset.key); }
+    else if (a === "pick") { el.checked ? S.picked.add(el.dataset.key) : S.picked.delete(el.dataset.key); render(); }
     else if (a === "wishtext") showOut("Wishlist — still to find", (S._need || []).map((n) => "1 " + n).join("\n"), "wishlist.txt");
     else if (a === "savetok") { S.token = $("#tok").value.trim(); try { localStorage.setItem("mtg_token", S.token); } catch (e) { /* ignore */ } loadAll(); }
     else if (a === "bulkdone") bulkDone();
@@ -977,7 +982,10 @@
       render();
     }
     else if (ev.target.id === "isrev") { S.reviewer = ev.target.checked; try { localStorage.setItem("mtg_reviewer", S.reviewer ? "1" : "0"); } catch (e) { /* ignore */ } }
-    else if (ev.target.id === "reserve") { S.reserve = Math.max(0, parseInt(ev.target.value, 10) || 0); S.picked = null; render(); }
+    else if (ev.target.dataset && ev.target.dataset.rs) { S.reserveBy[ev.target.dataset.rs] = Math.max(0, parseInt(ev.target.value, 10) || 0); S.picked = null; render(); }
+    else if (ev.target.id === "minprice") { S.minPrice = Math.max(0, parseFloat(ev.target.value) || 0); S.picked = null; render(); }
+    else if (ev.target.id === "flagprice") { S.flagPrice = Math.max(0, parseFloat(ev.target.value) || 0); render(); }
+    else if (ev.target.id === "showcommitted") { S.showCommitted = ev.target.checked; render(); }
     else if (ev.target.id === "upcsv") { const f = ev.target.files[0]; if (f) uploadCollection(f); }
     else if (ev.target.id === "local") {
       S.error = "";
