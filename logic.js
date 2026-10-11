@@ -474,21 +474,89 @@
   /* ---------- Deck stats: roles (Command Zone template), mana curve, colour pips, sources ---------- */
   const ROLE_KEYS = ["ramp", "draw", "targeted", "mass"];
   // Best-guess roles from the card's DB text. Override per card with deck.roles[key] = [..].
+  // Returns { role: "strong" | "soft" }. Strong = a dependable, unconditional effect. Soft = real but conditional, one-shot,
+  // narrow, or card-neutral (cantrips, loots, sacrifice fodder needed, artifact/enchantment-only removal, etc).
+  function classifyRolesEx(info) {
+    if (!info || /\bLand\b/.test(info.frontType)) return {};
+    const full = (info.text || "").replace(/\([^)]*\)/g, " ").replace(/[ \t]+/g, " "), spell = /Instant|Sorcery/.test(info.frontType), out = {};
+    const COND = /(?:^|\n)\s*(?:•\s*)?(?:Metalcraft|Morbid|Revolt|Delirium|Ferocious|Spell mastery|Threshold|Hellbent|Formidable|Raid|Addendum|Kicker|Corrupted)\b[^\n]*(?:—|\.)[^\n]*/gi;
+    const t = full.replace(COND, " ");                       // text without ability-word conditional sentences
+    const put = (r, lvl) => { if (out[r] !== "strong") out[r] = lvl; };
+    const trig = (s) => /\b(Whenever|When)\b/i.test(s);
+    const sents = t.split(/\n|(?<=[.])\s/).filter(Boolean);
+    // ---- ramp
+    if ((!spell && /:\s*(?:[^.:\n]{0,50}\.\s*)?Add\s+(\{|one |two |three |an amount|X\b|that much)/i.test(t)) || /Untap target (Forest|Island|Swamp|Mountain|Plains|land)/i.test(t)) put("ramp", "strong");
+    else if (spell && /^\s*Add\s+\{/im.test(t)) put("ramp", "soft");                                   // rituals
+    const fetchBf = /search your library for[^.]*(?:land|Plains|Island|Swamp|Mountain|Forest)[^.]*cards?[^.]*?(?:onto|on) the battlefield/i.test(t) || /put (a|an|up to \w+|any number of) (basic )?land cards? (from your hand )?onto the battlefield/i.test(t) ||
+      /search your library for[^.]*(?:land|Plains|Island|Swamp|Mountain|Forest)[^.]*cards?[^.]*put (?:one|it|that card|them)[^.]*onto the battlefield/i.test(t);
+    if (fetchBf) put("ramp", "strong");
+    if (/search your library for[^.]*(?:basic land|land|Plains|Island|Swamp|Mountain|Forest)[^.]*cards?[^.]*into your hand/i.test(t) || /\b(?:basic )?(?:land|plains|island|swamp|mountain|forest)cycling\b/i.test(info.text || "")) put("ramp", "soft");
+    if (/create (?:a|an|\w+) Treasure tokens?/i.test(t)) put("ramp", sents.some((s) => /create (?:a|an|\w+) Treasure/i.test(s) && /\bWhenever\b|At the beginning/i.test(s)) ? "strong" : "soft");
+    // ---- card advantage
+    let dr = null;
+    for (const s of sents) {
+      const m = /\bdraws? (a|an|one|two|three|four|five|X|that many|\d+|cards? equal|\w+ additional|cards equal)\b/i.exec(s) || /\bdraw cards equal\b|\bdraws? (?:a card|cards?) for each\b/i.exec(s);
+      if (!m) continue;
+      const many = /\b(two|three|four|five|X|that many|\d+|equal)\b/i.test(m[0]) || /for each/i.test(s);
+      const loot = /discard/i.test(t) && /then discard|discard (a|two|three|up to)/i.test(t);
+      const gated = trig(s) && /(deals? combat damage|attacks?|blocks?|dies|gain(?:ed)? life|cast|enters? .*under your control|put into a graveyard|second card)/i.test(s) && !/When (?:this|Mind|\S+) (?:creature|artifact|enchantment) enters/i.test(s);
+      const sacCost = /Sacrifice (?!this\b|\w+ (?:creature|artifact|enchantment|permanent) :)/i.test(s) && /:/.test(s) || /As an additional cost[^.]*sacrifice/i.test(t) || /Sacrifice (?!this)[^.:]*:[^.]*draw/i.test(s);
+      let lvl = "strong";
+      if (loot || gated || sacCost) lvl = "soft";
+      else if (!many && spell) lvl = "soft";                                        // plain cantrip: replaces itself
+      if (!many && !spell && /\bunless|\bif\b/i.test(s) && !/enters/i.test(s)) lvl = "soft";
+      dr = dr === "strong" ? dr : lvl; if (lvl === "strong") break;
+    }
+    if (dr) put("draw", dr);
+    if (/look at the top (\w+ )?cards? of your library[^.]*(put|into your hand)/i.test(t)) put("draw", "strong");
+    if (/\binvestigate\b|create (?:a|an|\w+) Clue/i.test(t)) put("draw", "soft");
+    if (/exile the top[^.]*(?:\n|\.)[^\n]*you may (play|cast)|you may (play|cast)[^.]*from the top of your library|exile the top[^.]*you may (play|cast)|you may play (?:those|that) cards?/i.test(t)) put("draw", /cast|upkeep|each|Whenever/i.test(t) && !/until the end of (?:your next )?turn/i.test(t) ? "strong" : "soft");
+    // ---- targeted disruption
+    const remB = (tx) => {
+      const hits = [];
+      if (/(destroy|exile) (up to \w+ |another |any number of |X )?target (?!player's graveyard|opponent's graveyard|cards? from)/i.test(tx)) hits.push("rm");
+      if (/(destroy|exile) (those|that|each of those) (creatures?|permanents?)/i.test(tx)) hits.push("rm");
+      if (/counter target (spell|activated|triggered)/i.test(tx) || /counter target [^.]*spell/i.test(tx)) hits.push("ctr");
+      if (/return target [^.]*? to (its|their) owner'?s? hands?/i.test(tx)) hits.push("bounce");
+      if (/deals? (\d+|X) damage to (any target|target|each of up to)/i.test(tx) || /deals? damage equal to [^.]*to target (creature|player|planeswalker|opponent)/i.test(tx)) hits.push("dmg");
+      if (/target [^.]*? gets? -(\d|X)\/-(\d|X)/i.test(tx)) hits.push("shrink");
+      if (/gain control of target/i.test(tx) && !/until end of turn/i.test(tx)) hits.push("steal");
+      if (/target (player|opponent) sacrifices/i.test(tx)) hits.push("edict");
+      return hits;
+    };
+    const inTrig = (tx) => { const hs = tx.split(/\n|(?<=[.])\s/).filter((s) => remB([s][0]).length); return hs.length && hs.every((s) => /\bWhenever\b|\bat the beginning\b/i.test(s) && !/enters|leaves/i.test(s)); };
+    let hits = remB(t);
+    if (hits.length) {
+      let lvl = "strong";
+      const nar = /(destroy|exile) (up to \w+ |another )?target (artifact|enchantment|noncreature|nonland permanent you|attacking|blocking|tapped|black|white|green|red|blue|colorless)/i.test(t) && !/target (creature|permanent|nonland permanent|planeswalker)/i.test(t.replace(/Destroy target (artifact|enchantment)[^.]*\./gi, ""));
+      if (hits.every((h) => h === "bounce") || nar && !/target (creature|permanent|planeswalker)/i.test(t)) lvl = "soft";
+      if (/destroy target (attacking|blocking|tapped|black|white|green|red|blue)/i.test(t) || /target [^.]*power (\d|X) or (greater|less)/i.test(t)) lvl = "soft";
+      if (hits.every((h) => h === "ctr") && /counter target (noncreature spell|enchantment|instant|sorcery|creature spell|artifact)/i.test(t) && !/counter target spell/i.test(t)) lvl = "soft";
+      if (hits.every((h) => h === "ctr") && /unless/i.test(t)) lvl = "soft";
+      if (hits.every((h) => h === "shrink") && !/-([3-9]|X)\/-([3-9]|X)/.test(t)) lvl = "soft";
+      if (hits.every((h) => h === "dmg") && !/deals? (?:[3-9]|\d\d|X) damage/i.test(t) && !/damage equal/i.test(t)) lvl = "soft";
+      if (inTrig(t)) lvl = "soft";                                                   // repeatable pings, attack/combat triggers
+      if (/(?:Whenever|When) [^.]*attacks?[^.]*(?:exile|destroy|target)/i.test(t) && hits.length === 1 && !/enters/i.test(t)) lvl = "soft";
+      if (/Choose (?:one or both|one|two|three)/i.test(t) && lvl === "strong" && !hits.includes("rm") && !hits.includes("ctr")) lvl = "soft";
+      put("targeted", lvl);
+    } else if (remB(full).length) put("targeted", "soft");                          // only via an ability-word clause (metalcraft, morbid…)
+    // ---- mass disruption
+    const m1 = /(destroy|exile) all (?![^.]*\bcards?\b)/i.test(t) || /(all|each) (other )?creatures? gets? -(\d|X)\/-(\d|X)/i.test(t) || /All creatures get -(\d|X)\/-/i.test(t) || /deals? (\d+|X) damage to each (other )?(non\w+ )?creature/i.test(t) ||
+      /return all (?![^.]*\bcards?\b)[^.]*? to (their|its) owners?'? hands?/i.test(t) || /each player sacrifices/i.test(t) || /(exile|destroy) each nonland permanent/i.test(t);
+    if (m1) {
+      let lvl = "strong";
+      if (/(destroy|exile) all [^.]*\b(with|that|without|of the chosen|artifacts? (and|or) enchantments?)\b/i.test(t) && !/Destroy all creatures\b/i.test(t) && !/all creatures\./i.test(t)) lvl = "soft";
+      if (/(opponents? control|you don't control)/i.test(t) && /\b[1-2] damage|\b-[1-2]\//.test(t)) lvl = "soft";
+      if (/each player sacrifices/i.test(t) && !/destroy all/i.test(t)) lvl = "soft";
+      if (/(destroy|exile) all artifacts?(?! and)/i.test(t) && !/creatures?/i.test(t)) lvl = "soft";
+      if (/Destroy each nonland permanent with mana value X/i.test(t) || /\{X\}:[^.]*destroy each/i.test(t)) lvl = "soft";
+      put("mass", lvl);
+    } else if (/(destroy|exile) all (?![^.]*\bcards?\b)|each (other )?creature gets -\d|damage to each (other )?creature/i.test(full)) put("mass", "soft");
+    return out;
+  }
   function classifyRoles(info) {
-    if (!info || /\bLand\b/.test(info.frontType)) return [];
-    const t = info.text || "", spell = /Instant|Sorcery/.test(info.frontType), r = [];
-    const ramp = (!spell && /:\s*Add\s+(\{|one |two |three |an amount)/i.test(t)) ||
-      (/search your library/i.test(t) && /(basic land|land|Plains|Island|Swamp|Mountain|Forest) cards?/i.test(t) && /battlefield/i.test(t)) ||
-      /put (a|an|up to \w+|any number of) (basic )?land cards? (from your hand )?onto the battlefield/i.test(t) ||
-      /create (a|an|\w+) Treasure tokens?/i.test(t);
-    if (ramp) r.push("ramp");
-    if (/\bdraws? (a|an|two|three|four|five|X|that many|\d+|cards? equal|\w+ additional) ?cards?/i.test(t) || /\bdraw (a|two|three) cards?/i.test(t) || /\binvestigate\b|create a Clue/i.test(t) ||
-      /look at the top (\w+ )?cards? of your library[^.]*(put|into your hand)/i.test(t) || /exile the top[^.]*you may (play|cast)/i.test(t) || /you may (play|cast)[^.]*from the top of your library/i.test(t)) r.push("draw");
-    if (/(destroy|exile) (up to \w+ |another |any number of )?target/i.test(t) || /counter target/i.test(t) || /return target [^.]*? to (its|their) owner'?s? hands?/i.test(t) ||
-      /deals? (\d+|X) damage to (any target|target)/i.test(t) || /target [^.]*? gets? -(\d|X)\/-/i.test(t) || /gain control of target/i.test(t) || /target (player|opponent) sacrifices/i.test(t)) r.push("targeted");
-    if (/(destroy|exile) all /i.test(t) || /each (other )?creature gets -\d/i.test(t) || /creatures (your opponents control|you don't control) get -/i.test(t) ||
-      /deals? \d+ damage to each (other )?(non\w+ )?creature/i.test(t) || /return all [^.]*? to (their|its) owners?'? hands?/i.test(t) || /each player sacrifices/i.test(t)) r.push("mass");
-    return r;
+    const x = classifyRolesEx(info);
+    return ROLE_KEYS.filter((k) => x[k] === "strong");
   }
   const COLS = ["W", "U", "B", "R", "G"], BASIC_COL = { Plains: "W", Island: "U", Swamp: "B", Mountain: "R", Forest: "G" };
   function producedColours(info) {
@@ -511,7 +579,7 @@
     const st = {
       total: 0, nonLand: 0, lands: 0, unknown: [], commander: [], curve: Array(8).fill(0), mvSum: 0, types: {},
       pips: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }, srcLand: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }, srcOther: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 },
-      tappedAlways: 0, tappedCond: 0, roles: { land: [], ramp: [], draw: [], targeted: [], mass: [], plan: [] }, multiRole: 0, targets: tpl,
+      tappedAlways: 0, tappedCond: 0, roles: { land: [], ramp: [], draw: [], targeted: [], mass: [], plan: [] }, soft: { ramp: [], draw: [], targeted: [], mass: [] }, multiRole: 0, targets: tpl,
     };
     const tally = (arr, key, n) => { if (!arr.find((x) => x.key === key)) arr.push({ key, qty: n }); };
     for (const e of list) {
@@ -539,7 +607,8 @@
         if (cs.length) cs.forEach((c) => { st.pips[c] += q; }); else if (m[1].toUpperCase() === "C") st.pips.C += q;
       }
       if (prod.size) for (const c of prod) st.srcOther[c] += q;
-      const auto = classifyRoles(info), roles = overrides[e.key] ? overrides[e.key].filter((x) => ROLE_KEYS.includes(x)) : auto;
+      const ex = classifyRolesEx(info), auto = ROLE_KEYS.filter((k) => ex[k] === "strong"), roles = overrides[e.key] ? overrides[e.key].filter((x) => ROLE_KEYS.includes(x)) : auto;
+      if (!overrides[e.key]) for (const k of ROLE_KEYS) if (ex[k] === "soft") tally(st.soft[k], e.key, q);
       if (roles.length > 1) st.multiRole += q;
       roles.forEach((r) => tally(st.roles[r], e.key, q));
       if (!roles.length) tally(st.roles.plan, e.key, q);
@@ -547,6 +616,7 @@
     st.avgMv = st.nonLand ? st.mvSum / st.nonLand : 0;
     const n = (k) => st.roles[k].reduce((s2, x) => s2 + x.qty, 0);
     st.counts = { lands: st.lands, ramp: n("ramp"), draw: n("draw"), targeted: n("targeted"), mass: n("mass"), plan: n("plan") };
+    st.softCounts = {}; for (const k of ROLE_KEYS) st.softCounts[k] = st.soft[k].reduce((s2, x) => s2 + x.qty, 0);
     return st;
   }
 
@@ -587,7 +657,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    eligibleRows, printings, printKeyOf, deckStats, classifyRoles, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;

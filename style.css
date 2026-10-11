@@ -111,3 +111,5 @@ div.scimg{display:flex;align-items:center;justify-content:center;text-align:cent
 
 /* stop the phone's "save image" menu: touches land on the card, not the picture */
 [data-peek] img,.ac img,.sc img,.tile img,.hero img,.mbox img,#peek{pointer-events:none;-webkit-touch-callout:none;-webkit-user-drag:none;user-select:none}
+
+.chips button.maybe{border-style:dashed;opacity:.8}

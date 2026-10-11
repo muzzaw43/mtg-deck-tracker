@@ -415,6 +415,7 @@
     const o = d.roles && d.roles[key];
     return o ? o.filter((x) => M.ROLE_KEYS.includes(x)) : M.classifyRoles(M.cardInfo(S.idx, key));
   }
+  function softRole(d, key, r) { return !(d.roles && d.roles[key]) && M.classifyRolesEx(M.cardInfo(S.idx, key))[r] === "soft"; }
   function statsPanel(d) {
     const mode = S.statsMode || "swaps", st = M.deckStats(d, S.idx, statsList(d), S.cfg), T = st.targets;
     let h = `<div class="card stats"><div class="row"><b>Deck stats</b><button class="btn alt" data-act="stats">Close</button></div>
@@ -430,10 +431,12 @@
       const have = st.counts[k], want = T[k], diff = have - want, pct = Math.min(100, Math.round((have / (want || 1)) * 100));
       const cls = k === "plan" ? "" : have >= want ? "ok" : have >= want - 1 ? "warn" : "err";
       const open = S.statsRole === k;
-      h += `<div class="trow" data-act="statsrole" data-r="${k}"><div class="row"><span>${ROLE_LABEL[k]}</span><span><b>${have}</b> <span class="muted">/ ${k === "plan" ? "~" : ""}${want}</span> ${k === "plan" ? "" : `<span class="pill ${cls}">${diff >= 0 ? "+" + diff : diff}</span>`}</span></div><div class="bar"><i class="${cls}" style="width:${pct}%"></i></div></div>`;
+      h += `<div class="trow" data-act="statsrole" data-r="${k}"><div class="row"><span>${ROLE_LABEL[k]}</span><span><b>${have}</b> ${st.softCounts && st.softCounts[ROLE_STAT[k]] ? `<span class="muted">(+${st.softCounts[ROLE_STAT[k]]} maybe)</span> ` : ""}<span class="muted">/ ${k === "plan" ? "~" : ""}${want}</span> ${k === "plan" ? "" : `<span class="pill ${cls}">${diff >= 0 ? "+" + diff : diff}</span>`}</span></div><div class="bar"><i class="${cls}" style="width:${pct}%"></i></div></div>`;
       if (open) {
         const list = st.roles[ROLE_STAT[k]].map((x) => ({ ...x, name: (M.cardInfo(S.idx, x.key) || { name: x.key }).name })).sort((a, b) => a.name.localeCompare(b.name));
         h += `<div class="chips">${list.map((x) => `<button data-act="zoom" data-peek="${esc(x.key)}" data-key="${esc(x.key)}" data-slug="${esc(d.slug)}">${x.qty > 1 ? x.qty + "× " : ""}${esc(plain(x.name))}</button>`).join("") || `<span class="muted">None.</span>`}</div>`;
+        const sl = ((st.soft || {})[ROLE_STAT[k]] || []).map((x) => ({ ...x, name: (M.cardInfo(S.idx, x.key) || { name: x.key }).name })).sort((a2, b2) => a2.name.localeCompare(b2.name));
+        if (sl.length) h += `<div class="muted" style="margin-top:6px">Maybe (not counted: conditional, one-shot, narrow or card-neutral). Tap one, then switch the role on to count it.</div><div class="chips soft">${sl.map((x) => `<button class="maybe" data-act="zoom" data-peek="${esc(x.key)}" data-key="${esc(x.key)}" data-slug="${esc(d.slug)}">${x.qty > 1 ? x.qty + "× " : ""}${esc(plain(x.name))}</button>`).join("")}</div>`;
       }
     }
     h += `<div class="muted">${st.multiRole} cards fill more than one role.</div>`;
@@ -574,7 +577,7 @@
     const pr = M.pickSid(S.own, S.idx, k, d), o = S.own.get(k);
     return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${artImg(k, name, d, "normal", "zimg")}${oracleBox(info, k)}
       <div>${ownPill(k, true)} ${o ? `<span class="muted">${[...o.binders].map(([b, q]) => esc(b) + " ×" + q).join(", ")}</span>` : ""}</div>
-      ${info && d && !/\bLand\b/.test(info.frontType) ? `<div class="muted" style="margin-top:6px">Counts as (for ${esc(d.name || d.slug)}):</div><div class="chips">${M.ROLE_KEYS.map((r) => `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="${r}" class="${effRoles(d, k).includes(r) ? "on" : ""}">${{ ramp: "Ramp", draw: "Card advantage", targeted: "Targeted", mass: "Mass" }[r]}</button>`).join("")}${d.roles && d.roles[k] ? `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="auto">Reset to auto</button>` : ""}</div>` : ""}
+      ${info && d && !/\bLand\b/.test(info.frontType) ? `<div class="muted" style="margin-top:6px">Counts as (for ${esc(d.name || d.slug)}):</div><div class="chips">${M.ROLE_KEYS.map((r) => `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="${r}" class="${effRoles(d, k).includes(r) ? "on" : softRole(d, k, r) ? "maybe" : ""}">${{ ramp: "Ramp", draw: "Card advantage", targeted: "Targeted", mass: "Mass" }[r]}</button>`).join("")}${d.roles && d.roles[k] ? `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="auto">Reset to auto</button>` : ""}</div>` : ""}
       <button class="btn" data-act="closezoom">Close</button></div></div>`;
   }
   const norm = M.norm;
