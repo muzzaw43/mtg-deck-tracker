@@ -73,7 +73,7 @@
   const b64 = (str) => { const by = new TextEncoder().encode(str); let bin = ""; by.forEach((c) => { bin += String.fromCharCode(c); }); return btoa(bin); };
   async function saveDeck(d, message) {
     if (!S.wtoken) throw new Error("Saving needs a write token — add it in Data (Contents: read and write, only " + S.cfg.dataRepo + ").");
-    const body = { ...d }; delete body.slug; delete body._sha; delete body._orig;
+    const body = { ...d }; delete body.slug; delete body._sha; delete body._orig; delete body._mb;
     body.updated = new Date().toISOString().slice(0, 10);
     const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/decks/${d.slug}.json`;
     const put = (sha) => fetch(url, { method: "PUT", headers: { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" },
@@ -117,31 +117,105 @@
       if (!pr.ok) throw new Error("Upload failed: GitHub " + pr.status);
       S.rows = rows; S.csvName = "ManaBox_Collection.csv";
       S.log.push(`Uploaded ${file.name}: ${rows.length} rows (was ${oldN})`);
-      S.saving = ""; recompute();
+      S.saving = ""; recompute(); S.tab = "data"; S.deck = null;
     } catch (e) { S.error = e.message; S.saving = ""; }
     status(); render();
+  }
+  const LEGACY = { "Approved": "pencilled", "Made by hand": "pencilled", "Done in ManaBox": "made", "Cancelled": "pencilled", "Back to pencilled": "made" };
+  const prevOf = (e) => (e.prev !== undefined ? e.prev : LEGACY[e.act]);
+  const lastUndo = (p) => { const l = p.log || []; for (let k = l.length - 1; k >= 0; k--) if (prevOf(l[k]) !== undefined) return k; return -1; };
+  const SW_TEXT = {
+    approve: "Approve this swap? (Still just an idea — nothing changes in ManaBox.)",
+    made: "Mark as MADE BY HAND? You swapped the physical cards. ManaBox is not updated yet, so it'll show as a to-do.",
+    done: "Mark as DONE? Only do this once ManaBox itself shows the change. The next collection upload is checked against it.",
+    cancel: "Cancel this swap? It moves to the change history, where you can undo it.",
+    undo: "Undo the last change to this swap?",
+  };
+  function reconcile() {
+    const r = { confirmed: [], missing: [], ready: [], looks: [], todo: [] };
+    if (!S.idx || !S.rows.length) return r;
+    for (const d of S.decks) {
+      if (M.norm(d.status) !== "built") continue;
+      const m = M.deckMap(d, S.idx);
+      (d.pencilled || []).forEach((p, i) => {
+        const st = M.pencilStatus(p);
+        if (st === "dropped" || !(p.out || p.in)) return;
+        const shown = M.swapShown(d, p, S.idx, m), it = { d, p, i, text: `${d.name}: ${p.out || "—"} → ${p.in || "—"}` };
+        if (st === "done") (shown ? r.confirmed : r.missing).push(it);
+        else if (st === "made") (shown ? r.ready : r.todo).push(it);
+        else if (shown && p.out && p.in) r.looks.push(it);
+      });
+    }
+    return r;
+  }
+  async function bulkDone() {
+    const rc = reconcile();
+    if (!rc.ready.length || !S.wtoken) return;
+    if (!confirm(`ManaBox now shows ${rc.ready.length} swaps you made by hand. Mark them all done?\n\n` + rc.ready.map((x) => x.text).join("\n"))) return;
+    const at = new Date().toISOString().slice(0, 10), by = S.who || "me";
+    S.error = ""; S.saving = "Saving…"; render();
+    try {
+      for (const d of new Set(rc.ready.map((x) => x.d))) {
+        const keep = JSON.stringify(d.pencilled);
+        for (const x of rc.ready.filter((y) => y.d === d)) { x.p.log = (x.p.log || []).concat({ at, by, act: "Marked done", prev: "made" }); x.p.status = "done"; }
+        try { await saveDeck(d, `Swaps (${d.name}): marked done after collection update${S.who ? " [" + S.who + "]" : ""}`); }
+        catch (e) { d.pencilled = JSON.parse(keep); throw e; }
+      }
+      recompute();
+    } catch (e) { S.error = e.message; recompute(); }
+    S.saving = ""; status(); render();
+  }
+  function reconCard() {
+    if (!S.decks.length || !S.rows.length) return "";
+    const rc = reconcile();
+    const list = (a) => `<div class="muted">${a.map((x) => esc(x.text)).join("<br>")}</div>`;
+    let h = `<h2>Swaps vs collection CSV</h2><div class="card"><div class="muted">${esc(S.csvName)} checked against every swap in your decks.</div>`;
+    h += `<div>${rc.confirmed.length} done and shown in ManaBox ✓</div>`;
+    if (rc.ready.length) h += `<div><span class="pill ok">${rc.ready.length} made by hand — ManaBox now shows them</span></div>${list(rc.ready)}${S.wtoken ? `<button class="btn" data-act="bulkdone">Mark these done</button>` : ""}`;
+    if (rc.missing.length) h += `<div><span class="pill warn">${rc.missing.length} marked done but NOT in ManaBox</span></div>${list(rc.missing)}`;
+    if (rc.todo.length) h += `<div><span class="pill todo">${rc.todo.length} made by hand, still to do in ManaBox</span></div>${list(rc.todo)}`;
+    if (rc.looks.length) h += `<div><span class="pill pencil">${rc.looks.length} pencilled but ManaBox already shows them</span></div>${list(rc.looks)}`;
+    return h + `</div>`;
   }
   async function swapAction(slug, i, act) {
     const d = deckBySlug(slug), p = d && (d.pencilled || [])[i];
     if (!p) return;
     const before = JSON.stringify(p), at = new Date().toISOString().slice(0, 10), by = S.who || "me";
     const label = (p.in || "?") + (p.out ? " for " + p.out : "");
-    let msg = "";
-    if (act === "approve") { p.status = "approved"; msg = "Approved"; }
-    else if (act === "made") { p.status = "made"; msg = "Made by hand"; }
-    else if (act === "done") { p.status = "done"; msg = "Done in ManaBox"; }
-    else if (act === "revert") { p.status = "pencilled"; msg = "Back to pencilled"; }
-    else if (act === "cancel") { if (!confirm("Cancel this swap?\n" + label)) return; p.status = "dropped"; msg = "Cancelled"; }
-    else if (act === "change") {
+    const status0 = p.status || "pencilled";
+    let msg = "", entry = null;
+    if (act === "undo") {
+      const k = lastUndo(p);
+      if (k < 0) return;
+      const e = p.log[k];
+      if (!confirm(`${SW_TEXT.undo}\n\n${label}\nBack to: ${prevOf(e)}${e.fromIn ? " (IN: " + e.fromIn + ")" : ""}`)) return;
+      p.status = prevOf(e);
+      if (e.fromIn !== undefined) p.in = e.fromIn;
+      if (e.noteBefore !== undefined) p.note = e.noteBefore;
+      p.log = p.log.filter((_, n) => n !== k);
+      msg = "Undid: " + e.act;
+    } else if (act === "change") {
       const nm = (prompt("Which card went IN instead? (exact name; blank to keep " + (p.in || "none") + ")", "") || "").trim();
       if (!nm) return;
       const k = M.resolve(S.idx, nm);
       if (!k) { S.error = `"${nm}" is not in the card DB — check the spelling (nothing saved).`; render(); return; }
-      p.log = (p.log || []).concat({ at, by, act: "changed IN", from: p.in || "" });
+      if (!confirm(`Change the IN card?\n\nWas: ${p.in || "—"}\nNow: ${k}`)) return;
+      entry = { at, by, act: "Changed IN to " + k, prev: status0, fromIn: p.in || "", noteBefore: p.note || "" };
       p.note = ((p.note ? p.note + " · " : "") + "was " + (p.in || "—")).trim();
-      p.in = k; msg = "Changed IN to " + k;
+      p.in = k; msg = entry.act;
+    } else {
+      let q = SW_TEXT[act];
+      if (!q) return;
+      if (act === "done") {
+        const m = M.deckMap(d, S.idx);
+        if (!M.swapShown(d, p, S.idx, m)) q += "\n\nNote: the current collection CSV does NOT show this swap in the deck yet.";
+      }
+      if (!confirm(q + "\n\n" + label)) return;
+      p.status = { approve: "approved", made: "made", done: "done", cancel: "dropped" }[act];
+      msg = { approve: "Approved", made: "Made by hand", done: "Marked done", cancel: "Cancelled" }[act];
+      entry = { at, by, act: msg, prev: status0 };
     }
-    p.log = (p.log || []).concat({ at, by, act: msg });
+    if (entry) p.log = (p.log || []).concat(entry);
     S.error = ""; S.saving = "Saving…"; render();
     try { await saveDeck(d, `Swap (${d.name || d.slug}): ${msg} — ${label}${S.who ? " [" + S.who + "]" : ""}`); S.saving = ""; recompute(); }
     catch (e) { d.pencilled[i] = JSON.parse(before); S.error = e.message; S.saving = ""; }
@@ -150,6 +224,7 @@
 
   function recompute() {
     if (!S.idx) { S.own = new Map(); S.checks = []; S.wlEval = []; return; }
+    M.syncDeckLists(S.decks, S.rows);
     S.own = M.buildOwnership(S.rows, S.idx, S.cfg);
     S.claims = M.buildClaims(S.decks, S.idx);
     S.checks = M.runChecks({ decks: S.decks, idx: S.idx, own: S.own, claims: S.claims, cfg: S.cfg });
@@ -250,8 +325,9 @@
     const btn = (i, act, txt, alt) => `<button class="btn${alt ? " alt" : ""}" data-act="swap" data-slug="${esc(d.slug)}" data-i="${i}" data-sw="${act}">${txt}</button>`;
     const swapBlock = (list, cls) => list.map((p) => {
       const i = (d.pencilled || []).indexOf(p), st = M.pencilStatus(p);
-      const btns = !S.wtoken ? "" : st === "made" ? btn(i, "done", "Mark done") + btn(i, "revert", "Undo", 1) + btn(i, "change", "Different card", 1)
-        : (st === "approved" ? "" : btn(i, "approve", "Approve")) + btn(i, "made", "I made it") + btn(i, "change", "Different card", 1) + btn(i, "cancel", "Cancel", 1);
+      const und = lastUndo(p) >= 0 ? btn(i, "undo", "Undo last change", 1) : "";
+      const btns = !S.wtoken ? "" : st === "made" ? btn(i, "done", "Mark done") + btn(i, "change", "Different card", 1) + btn(i, "cancel", "Cancel", 1) + und
+        : (st === "approved" ? "" : btn(i, "approve", "Approve")) + btn(i, "made", "I made it") + btn(i, "change", "Different card", 1) + btn(i, "cancel", "Cancel", 1) + und;
       let x = `<div class="card"><span class="pill ${cls}">${esc(p.status || "pencilled")}</span> ${p.note ? `<span class="muted">${esc(p.note)}</span>` : ""}`;
       if (p.out) x += `<div class="muted">OUT</div>` + cardRow(M.keyOf(S.idx, p.out), p.out, 1, "out", true, "", d);
       if (p.in) { const k = M.keyOf(S.idx, p.in); x += `<div class="muted">IN</div>` + cardRow(k, p.in, 1, "in", true, ownPill(k, true), d); }
@@ -261,6 +337,18 @@
     if (!S.wtoken && (mades.length || pencils.length)) h += `<div class="muted">Read-only. Add a write token in Data to confirm, change or cancel swaps here.</div>`;
     if (mades.length) h += `<h3>Made by hand — update ManaBox (${mades.length})</h3>` + swapBlock(mades, "todo");
     if (pencils.length) h += `<h3>Pencilled swaps (${pencils.length})</h3>` + swapBlock(pencils, "pencil");
+    const hist = (d.pencilled || []).map((p, i) => ({ p, i })).filter((x) => ["done", "dropped"].includes(M.pencilStatus(x.p)));
+    if (hist.length) {
+      const mm = M.deckMap(d, S.idx);
+      h += `<h3>Change history (${hist.length})</h3>` + hist.map(({ p, i }) => {
+        const dn = M.pencilStatus(p) === "done", shown = M.swapShown(d, p, S.idx, mm);
+        const last = (p.log || [])[(p.log || []).length - 1];
+        return `<div class="card"><span class="pill ${dn ? (shown ? "ok" : "warn") : ""}">${dn ? (shown ? "done · in ManaBox ✓" : "done · not in ManaBox yet") : "cancelled"}</span>
+          <div>${p.out ? `<span class="muted">OUT</span> ${esc(p.out)} ` : ""}${p.in ? `<span class="muted">IN</span> ${esc(p.in)}` : ""}</div>
+          ${last ? `<div class="muted">${esc(last.at)} · ${esc(last.by)} · ${esc(last.act)}</div>` : ""}
+          ${S.wtoken && lastUndo(p) >= 0 ? `<button class="btn alt" data-act="swap" data-slug="${esc(d.slug)}" data-i="${i}" data-sw="undo">Undo</button>` : ""}</div>`;
+      }).join("");
+    }
     const wls = S.wlEval.filter((w) => (w.decks || []).includes(d.slug));
     if (wls.length) h += `<h3>Wishlist</h3>` + wls.map((w) => cardRow(w.key, w.name, 1, "", false, wishPill(w), d) + (w.note ? `<div class="muted">${esc(w.note)}</div>` : "")).join("");
     if ((d.wishlist || []).length) {
@@ -343,6 +431,7 @@
       <input type="text" id="who" placeholder="Your name (shown in the swap log)" value="${esc(S.who)}" style="margin-top:6px">
       <button class="btn" data-act="savewtok">Save</button>${S.wtoken ? `<button class="btn alt" data-act="forgetw">Forget write token</button>` : ""}</div>`;
     if (S.wtoken) h += `<h2>Update collection</h2><div class="card"><div class="muted">Pick a fresh ManaBox collection CSV. It replaces <b>collection/ManaBox_Collection.csv</b> in the data repo for everyone using it.</div><input type="file" id="upcsv" accept=".csv"></div>`;
+    h += reconCard();
     if (S.log.length) h += `<div class="card muted">${S.log.map(esc).join("<br>")}</div>`;
     h += `<h2>Load local files</h2><div class="card"><div class="muted">Try things without the token: pick a ManaBox CSV and/or deck JSON files. Nothing leaves your device.</div>
       <input type="file" id="local" multiple accept=".csv,.json"></div>`;
@@ -407,6 +496,7 @@
     else if (a === "pick") { el.checked ? S.picked.add(el.dataset.key) : S.picked.delete(el.dataset.key); }
     else if (a === "wishtext") showOut("Wishlist — still to find", (S._need || []).map((n) => "1 " + n).join("\n"), "wishlist.txt");
     else if (a === "savetok") { S.token = $("#tok").value.trim(); try { localStorage.setItem("mtg_token", S.token); } catch (e) { /* ignore */ } loadAll(); }
+    else if (a === "bulkdone") bulkDone();
     else if (a === "swap") swapAction(el.dataset.slug, +el.dataset.i, el.dataset.sw);
     else if (a === "savewtok") { S.wtoken = $("#wtok").value.trim(); S.who = $("#who").value.trim(); try { localStorage.setItem("mtg_wtoken", S.wtoken); localStorage.setItem("mtg_who", S.who); } catch (e) { /* ignore */ } render(); }
     else if (a === "forgetw") { S.wtoken = ""; try { localStorage.removeItem("mtg_wtoken"); } catch (e) { /* ignore */ } render(); }

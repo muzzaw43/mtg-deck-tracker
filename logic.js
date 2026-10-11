@@ -137,13 +137,36 @@
 
   function deckMap(deck, idx) {
     const m = new Map();
-    for (const c of deck.cards || []) {
+    for (const c of deck._mb || deck.cards || []) {
       const key = keyOf(idx, c.name);
       const e = m.get(key) || { key, name: resolve(idx, c.name) || c.name, qty: 0 };
       e.qty += c.qty == null ? 1 : c.qty;
       m.set(key, e);
     }
     return m;
+  }
+  // The live ManaBox list for a deck = the CSV rows in the deck binder with the same name (falls back to the saved snapshot).
+  function syncDeckLists(decks, rows) {
+    const by = new Map();
+    for (const r of rows || []) {
+      if (norm(r.btype) !== "deck") continue;
+      const k = norm(r.binder);
+      if (!by.has(k)) by.set(k, []);
+      by.get(k).push({ name: r.name, qty: r.qty });
+    }
+    for (const d of decks) {
+      const l = by.get(norm(d.name || ""));
+      if (!l) { delete d._mb; continue; }
+      // display copies listed in deck.extras sit in the binder but are not part of the 100
+      const ex = new Map();
+      for (const x of d.extras || []) ex.set(norm(x.name), (ex.get(norm(x.name)) || 0) + 1);
+      d._mb = l.map((c) => { const n = ex.get(norm(c.name)) || 0; const take = Math.min(n, c.qty); if (take) ex.set(norm(c.name), n - take); return { name: c.name, qty: c.qty - take }; }).filter((c) => c.qty > 0);
+    }
+  }
+  // Does the ManaBox list already show this swap (OUT gone and IN present)? Works for any status.
+  function swapShown(deck, p, idx, m) {
+    m = m || deckMap(deck, idx);
+    return (!p.out || !m.has(keyOf(idx, p.out))) && (!p.in || m.has(keyOf(idx, p.in))) && !!(p.out || p.in);
   }
   const deckTotal = (m) => [...m.values()].reduce((s, e) => s + e.qty, 0);
 
@@ -269,6 +292,17 @@
         }
       }
 
+      if (built && haveCollection) {
+        for (const p of d.pencilled || []) {
+          const pst = pencilStatus(p);
+          const label = `${p.out || "—"} → ${p.in || "—"}`;
+          if (pst === "done" && !swapShown(d, p, idx, m))
+            add("warn", d, p.in || p.out, `Marked done, but the collection CSV doesn't show it in the deck yet [${label}] — update ManaBox, or undo the "done" in the app`);
+          else if ((pst === "pencilled" || pst === "approved") && p.out && p.in && swapShown(d, p, idx, m))
+            add("info", d, p.in, `ManaBox already shows this swap — was it made? Mark it done, or cancel it [${label}]`);
+        }
+      }
+
       for (const w of d.wishlist || []) {
         const k = keyOf(idx, w.name), info = cardInfo(idx, k);
         if (!info) { add("warn", d, w.name, "Wishlist card not found in the card DB"); continue; }
@@ -391,7 +425,7 @@
     artUrl, artByName, pickSid,
     DEFAULT_CONFIG, norm, isBasic, parseCSV, parseCollection, csvEscape,
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
-    pencilStatus, isReflected, evalWishlist,
+    pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
     buildClaims, sumQty, runChecks, buildTrades, tradesCSV, tradesText,
   };
