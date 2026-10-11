@@ -402,8 +402,12 @@
       const btns = !S.wtoken ? "" : st === "made" ? btn(i, "done", "Mark done") + btn(i, "change", "Different card", 1) + btn(i, "cancel", "Cancel", 1) + und
         : (st === "approved" ? "" : btn(i, "approve", "Approve")) + btn(i, "made", "I made it") + btn(i, "change", "Different card", 1) + (p.out ? "" : btn(i, "changeout", "Choose cut", 1)) + btn(i, "cancel", "Cancel", 1) + und;
       let x = `<div class="card"><span class="pill ${cls}">${esc(p.status || "pencilled")}</span> ${p.note ? `<span class="muted">${esc(p.note)}</span>` : ""}`;
-      if (p.out) x += `<div class="muted">OUT</div>` + cardRow(M.keyOf(S.idx, p.out), p.out, 1, "out", true, "", d);
-      if (p.in) { const k = M.keyOf(S.idx, p.in); x += `<div class="muted">IN</div>` + cardRow(k, p.in, 1, "in", true, ownPill(k, true), d); }
+      const side = (nm, role) => {
+        if (!nm) return `<div class="sc empty"><div class="scimg">${role === "out" ? "Cut not chosen yet" : "No card"}</div><div class="scl">${role.toUpperCase()}</div></div>`;
+        const k = M.keyOf(S.idx, nm);
+        return `<div class="sc ${role}" data-act="zoom" data-key="${esc(k)}" data-slug="${esc(d.slug)}">${artImg(k, nm, d, "normal", "scimg")}<div class="scl"><span class="tagl ${role}">${role.toUpperCase()}</span> ${esc(nm)}</div>${role === "in" ? `<div>${ownPill(k, true)}</div>` : ""}</div>`;
+      };
+      x += `<div class="swapcards">${side(p.out, "out")}<div class="arrow">→</div>${side(p.in, "in")}</div>`;
       return x + (btns ? `<div>${btns}</div>` : "") + `</div>`;
     }).join("");
     const mades = pens.filter((p) => M.pencilStatus(p) === "made"), pencils = pens.filter((p) => M.pencilStatus(p) !== "made");
