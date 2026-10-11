@@ -69,8 +69,8 @@ select{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);bac
 @media (hover:hover){
   .ac{transition:transform .12s}
   .ac:hover{overflow:visible;z-index:6}
-  .ac:hover .acimg{transform:scale(1.35);transform-origin:top center;border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.65);position:relative}
-  .gridv .ac:hover .acimg,.ac.full:hover .acimg{transform:scale(1.3);transform-origin:center}
+  .ac:hover .acimg{transform:scale(1.75);transform-origin:top center;border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.65);position:relative}
+  .gridv .ac:hover .acimg,.ac.full:hover .acimg{transform:scale(1.7);transform-origin:center}
 }
 
 /* swaps shown as cards */
