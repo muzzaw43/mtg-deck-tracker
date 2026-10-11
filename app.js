@@ -1,0 +1,318 @@
+/* MTG Deck Tracker – UI. Read-only: all data comes from a private GitHub repo via a read-only token. */
+(function () {
+  "use strict";
+  const M = window.MTG;
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  const S = {
+    tab: "decks", deck: null, token: "", cfg: { ...M.DEFAULT_CONFIG },
+    idx: null, rows: [], csvName: "", own: new Map(), decks: [], claims: { hard: new Map(), soft: new Map() },
+    checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
+  };
+  try { S.token = localStorage.getItem("mtg_token") || ""; } catch (e) { /* storage blocked */ }
+
+  /* ---------- GitHub ---------- */
+  async function gh(path, raw) {
+    const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/${path}?ref=${encodeURIComponent(S.cfg.branch)}`;
+    const r = await fetch(url, { headers: { Authorization: "Bearer " + S.token, Accept: raw ? "application/vnd.github.raw+json" : "application/vnd.github+json" } });
+    if (r.status === 401) { const e = new Error("Token rejected — it may have expired or been revoked. Make a new read-only token and paste it in Data."); e.code = 401; throw e; }
+    if (r.status === 403) { const e = new Error("GitHub refused the request (403) — token lacks Contents: read, or you're rate limited."); e.code = 403; throw e; }
+    if (r.status === 404) { const e = new Error("Not found: " + path + " (or the token can't see the repo)"); e.code = 404; throw e; }
+    if (!r.ok) throw new Error("GitHub error " + r.status);
+    return raw ? r.text() : r.json();
+  }
+  async function ghList(path) {
+    try { return await gh(path, false); } catch (e) { if (e.code === 404) return []; throw e; }
+  }
+
+  async function loadDB() {
+    S.busy = "Loading card DB…"; status();
+    const r = await fetch(S.cfg.dbUrl);
+    if (!r.ok) throw new Error("Card DB failed to load (" + r.status + ")");
+    const db = await r.json();
+    S.idx = M.buildIndex(db);
+    S.dbCount = Object.keys(db).length;
+  }
+
+  async function loadAll() {
+    S.error = ""; S.busy = "Loading…"; status(); render();
+    try {
+      if (!S.token) throw new Error("Paste your read-only GitHub token in Data to load your private decks and collection.");
+      try { S.cfg = { ...M.DEFAULT_CONFIG, ...JSON.parse(await gh("config.json", true)) }; }
+      catch (e) { if (e.code === 401 || e.code === 403) throw e; }
+      const dbP = loadDB();
+      const deckFiles = (await ghList("decks")).filter((f) => f.type === "file" && /\.json$/i.test(f.name) && !f.name.startsWith("_"));
+      S.decks = await Promise.all(deckFiles.map(async (f) => {
+        const d = JSON.parse(await gh("decks/" + f.name, true));
+        d.slug = f.name.replace(/\.json$/i, "");
+        return d;
+      }));
+      const csvs = (await ghList("collection")).filter((f) => f.type === "file" && /\.csv$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name));
+      let text = "", name = "";
+      if (csvs.length) { name = csvs[csvs.length - 1].name; text = await gh("collection/" + name, true); }
+      await dbP;
+      if (text) { S.rows = M.parseCollection(text); S.csvName = name; }
+    } catch (e) { S.error = e.message; }
+    S.busy = ""; recompute(); status(); render();
+  }
+
+  function recompute() {
+    if (!S.idx) { S.own = new Map(); S.checks = []; return; }
+    S.own = M.buildOwnership(S.rows, S.idx, S.cfg);
+    S.claims = M.buildClaims(S.decks, S.idx);
+    S.checks = M.runChecks({ decks: S.decks, idx: S.idx, own: S.own, claims: S.claims, cfg: S.cfg });
+    S.picked = null;
+  }
+
+  function status() {
+    const bits = [];
+    if (S.busy) bits.push(S.busy);
+    else {
+      if (S.decks.length) bits.push(S.decks.length + " decks");
+      if (S.csvName) bits.push("CSV " + S.csvName);
+    }
+    $("#status").textContent = bits.join(" · ");
+  }
+
+  /* ---------- helpers ---------- */
+  const deckBySlug = (s) => S.decks.find((d) => d.slug === s);
+  const csvDate = () => { const m = /(\d{8})/.exec(S.csvName); return m ? `${m[1].slice(6)}/${m[1].slice(4, 6)}/${m[1].slice(0, 4)}` : ""; };
+  const issuesFor = (slug) => S.checks.filter((c) => c.deck === slug);
+  const TYPE_ORDER = ["Commander", "Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land", "Other"];
+  function groupOf(info) {
+    if (!info) return "Other";
+    const t = info.frontType;
+    if (/\bLand\b/.test(t)) return "Land";
+    for (const g of ["Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment"]) if (t.includes(g)) return g;
+    return "Other";
+  }
+  function oracleBox(info, key) {
+    if (!info) return `<div class="oracle">${esc(key.replace(/^\?/, ""))} — not in the card DB.</div>`;
+    return `<div class="oracle"><b>${esc(info.name)}</b>  ${esc(info.cost)}\n${esc(info.type)}\n${esc(info.text)}</div>`;
+  }
+  function artImg(key, name, deck, version, cls) {
+    const sid = M.pickSid(S.own, S.idx, key, deck);
+    const src = sid ? M.artUrl(sid, version) : M.artByName(name, version);
+    const fb = sid ? M.artByName(name, version) : "";
+    return `<img class="${cls}" loading="lazy" alt="" src="${esc(src)}"${fb ? ` data-fb="${esc(fb)}"` : ""}>`;
+  }
+  function cardRow(key, name, qty, cls, open, extra, deck) {
+    const info = M.cardInfo(S.idx, key);
+    return `<div class="cardrow ${cls || ""}" data-act="toggle"><div class="t"><span class="n">${artImg(key, name, deck, "art_crop", "thumb")}${qty > 1 ? qty + "× " : ""}${esc(name)}</span><span>${extra || ""}</span></div><div ${open ? "" : "hidden"} data-o>${artImg(key, name, deck, "art_crop", "bigart")}${oracleBox(info, key)}</div></div>`;
+  }
+  function ownPill(key, showFree) {
+    if (!S.rows.length) return "";
+    const o = S.own.get(key);
+    if (!o) return `<span class="pill err">not owned</span>`;
+    return showFree ? `<span class="pill ${o.free ? "ok" : "warn"}">${o.free} free / ${o.total}</span>` : "";
+  }
+
+  /* ---------- output / export ---------- */
+  function showOut(title, text, filename) { S.out = { title, text, filename }; render(); window.scrollTo(0, 0); }
+  function outBox() {
+    if (!S.out) return "";
+    return `<div class="card"><div class="row"><b>${esc(S.out.title)}</b><button class="back" data-act="closeout">close</button></div>
+      <textarea id="outta" readonly>${esc(S.out.text)}</textarea>
+      <button class="btn" data-act="copy">Copy</button><button class="btn alt" data-act="download">Download</button></div>`;
+  }
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall through */ }
+    try { const ta = $("#outta"); ta.focus(); ta.select(); if (document.execCommand("copy")) return true; } catch (e) { /* fall through */ }
+    return false;
+  }
+  function download(name, text) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  /* ---------- views ---------- */
+  function vDecks() {
+    if (S.deck) return vDeck(deckBySlug(S.deck));
+    if (!S.decks.length) return emptyMsg("No decks loaded yet.");
+    return S.decks.map((d) => {
+      const m = M.deckMap(d, S.idx), tot = M.deckTotal(m), is = issuesFor(d.slug);
+      const er = is.filter((i) => i.level === "error").length, wa = is.filter((i) => i.level === "warn").length;
+      const pc = M.activePencils(d).length;
+      return `<div class="card click" data-act="open" data-slug="${esc(d.slug)}"><div class="row"><b>${esc(d.name || d.slug)}</b><span class="pill">${esc(d.status || "planned")}</span></div>
+        <div class="muted">${esc(M.commandersOf(d).join(" + "))} · ${tot} cards</div>
+        <div>${pc ? `<span class="pill pencil">${pc} pencilled</span> ` : ""}${er ? `<span class="pill err">${er} errors</span> ` : ""}${wa ? `<span class="pill warn">${wa} warnings</span> ` : ""}${(d.wishlist || []).length ? `<span class="pill">${d.wishlist.length} wishlist</span>` : ""}</div></div>`;
+    }).join("");
+  }
+
+  function vDeck(d) {
+    if (!d) { S.deck = null; return vDecks(); }
+    const m = M.deckMap(d, S.idx), pens = M.activePencils(d);
+    const outKeys = new Set(pens.filter((p) => p.out).map((p) => M.keyOf(S.idx, p.out)));
+    let h = `<button class="back" data-act="back">← All decks</button><h2>${esc(d.name || d.slug)}</h2>
+      <div class="muted">${esc(M.commandersOf(d).join(" + "))} · ${esc(d.status || "planned")} · ${M.deckTotal(m)} cards${d.updated ? " · updated " + esc(d.updated) : ""}</div>
+      <div><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
+      ${pens.length ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with swaps applied</button>` : ""}</div>`;
+    const is = issuesFor(d.slug);
+    if (is.length) h += `<h3>Checks</h3>` + is.map(issueHtml).join("");
+    if (pens.length) {
+      h += `<h3>Pencilled swaps</h3>`;
+      for (const p of pens) {
+        h += `<div class="card"><span class="pill pencil">${esc(p.status || "pencilled")}</span> ${p.note ? `<span class="muted">${esc(p.note)}</span>` : ""}`;
+        if (p.out) h += `<div class="muted">OUT</div>` + cardRow(M.keyOf(S.idx, p.out), p.out, 1, "out", true, "", d);
+        if (p.in) { const k = M.keyOf(S.idx, p.in); h += `<div class="muted">IN</div>` + cardRow(k, p.in, 1, "in", true, ownPill(k, true), d); }
+        h += `</div>`;
+      }
+    }
+    if ((d.wishlist || []).length) {
+      h += `<h3>Wishlist</h3>` + d.wishlist.map((w) => { const k = M.keyOf(S.idx, w.name); return cardRow(k, w.name, 1, "", false, ownPill(k, true), d) + (w.note ? `<div class="muted">${esc(w.note)}</div>` : ""); }).join("");
+    }
+    const groups = {};
+    for (const [k, e] of m) { const info = M.cardInfo(S.idx, k); const isCmd = M.commandersOf(d).some((c) => M.keyOf(S.idx, c) === k); (groups[isCmd ? "Commander" : groupOf(info)] = groups[isCmd ? "Commander" : groupOf(info)] || []).push({ k, e, info }); }
+    for (const g of TYPE_ORDER) {
+      if (!groups[g]) continue;
+      const list = groups[g].sort((a, b) => a.e.name.localeCompare(b.e.name));
+      h += `<h3>${g} (${list.reduce((s, x) => s + x.e.qty, 0)})</h3>` + list.map((x) => cardRow(x.k, x.e.name, x.e.qty, outKeys.has(x.k) ? "out" : "", false, (outKeys.has(x.k) ? `<span class="pill pencil">out</span> ` : "") + (S.rows.length && !M.isBasic(x.e.name) && !S.own.get(x.k) && norm(d.status) === "built" ? `<span class="pill err">not in CSV</span>` : ""), d)).join("");
+    }
+    return h;
+  }
+  const norm = M.norm;
+
+  function issueHtml(i) {
+    return `<div class="card lvl-${i.level}"><div class="row"><span>${i.card ? `<b>${esc(i.card)}</b> — ` : ""}${esc(i.msg)}</span></div>${i.deckName ? `<div class="muted">${esc(i.deckName)}</div>` : ""}</div>`;
+  }
+  function vCheck() {
+    if (!S.decks.length) return emptyMsg("Load decks first.");
+    const counts = { error: 0, warn: 0, info: 0 };
+    S.checks.forEach((c) => counts[c.level]++);
+    const chip = (l, t) => `<button class="${S.level === l ? "on" : ""}" data-act="level" data-l="${l}">${t}</button>`;
+    const list = S.checks.filter((c) => S.level === "all" || c.level === S.level);
+    let h = `<h2>Discrepancy check</h2><div class="muted">Re-run on every load. Looks at deck size, singleton, colour identity, DB matches, collection vs deck claims, pencilled swaps and wishlist.${S.csvName ? ` Collection CSV dated ${esc(csvDate() || S.csvName)}.` : " No collection CSV loaded, so ownership checks are skipped."}</div>
+      <div class="chips">${chip("all", "All " + S.checks.length)}${chip("error", "Errors " + counts.error)}${chip("warn", "Warnings " + counts.warn)}${chip("info", "Info " + counts.info)}</div>`;
+    h += list.length ? list.map(issueHtml).join("") : `<div class="card">Nothing to report.</div>`;
+    return h;
+  }
+
+  function vTrades() {
+    if (!S.rows.length) return emptyMsg("Load a collection CSV first.");
+    const t = M.buildTrades({ own: S.own, claims: S.claims, cfg: S.cfg, idx: S.idx }, S.reserve);
+    if (!S.picked) S.picked = new Set(t.map((x) => x.key));
+    let h = `<h2>Trade candidates</h2><div class="muted">Spare copies in your free binders that no deck (built, planned or pencilled in) needs. Basics are skipped.</div>
+      <div class="row" style="margin-top:8px"><span>Keep this many spares of each</span><input type="number" min="0" value="${S.reserve}" id="reserve" style="width:70px"></div>`;
+    if (!t.length) return h + `<div class="card">Nothing spare right now.</div>`;
+    h += `<div><button class="btn" data-act="tradecsv">Export ManaBox CSV</button><button class="btn alt" data-act="tradetext">Export text list</button><button class="btn alt" data-act="tradeall">${S.picked.size === t.length ? "Untick all" : "Tick all"}</button></div>
+      <table><tr><th></th><th>Card</th><th>Spare</th><th>Own</th></tr>` +
+      t.map((x) => `<tr><td><input type="checkbox" data-act="pick" data-key="${esc(x.key)}" ${S.picked.has(x.key) ? "checked" : ""}></td><td>${x.alloc[0] && x.alloc[0].sid ? `<img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(x.alloc[0].sid))}">` : ""}${esc(x.name)}</td><td>${x.tradeable}</td><td class="muted">${x.total}</td></tr>`).join("") + `</table>`;
+    S._trades = t;
+    return h;
+  }
+
+  function vWishlist() {
+    if (!S.decks.length) return emptyMsg("Load decks first.");
+    const need = new Map();
+    let h = `<h2>Wishlist</h2><div class="muted">Per-deck wishlist cards plus pencilled IN cards you don't own a free copy of.</div>`;
+    for (const d of S.decks) {
+      const items = (d.wishlist || []).map((w) => ({ name: w.name, note: w.note, src: "wishlist" }));
+      for (const p of M.activePencils(d)) {
+        if (!p.in) continue;
+        const k = M.keyOf(S.idx, p.in), o = S.own.get(k);
+        if (S.rows.length && (!o || o.free - M.sumQty(S.claims.soft.get(k)) < 0 || o.free === 0)) items.push({ name: p.in, note: "pencilled swap", src: "pencilled" });
+      }
+      if (!items.length) continue;
+      h += `<h3>${esc(d.name || d.slug)}</h3>`;
+      for (const it of items) {
+        const k = M.keyOf(S.idx, it.name), o = S.own.get(k);
+        h += cardRow(k, it.name, 1, "", false, `<span class="pill ${it.src === "pencilled" ? "pencil" : ""}">${esc(it.note || it.src)}</span> ${ownPill(k, true)}`, d);
+        if (!o || !o.free) need.set(k, (M.cardInfo(S.idx, k) || { name: it.name }).name);
+      }
+    }
+    if (need.size) h += `<h3>Still to find</h3><button class="btn" data-act="wishtext">Export as text list</button>`;
+    S._need = [...need.values()].sort();
+    return need.size || h.includes("cardrow") ? h : emptyMsg("No wishlist cards yet.");
+  }
+
+  function vData() {
+    let h = `<h2>Access</h2><div class="card"><div class="muted">A read-only fine-grained GitHub token (Contents: read, only <b>${esc(S.cfg.dataRepo)}</b>). Stored in this browser only.</div>
+      <input type="password" id="tok" placeholder="github_pat_…" autocomplete="off" value="${esc(S.token)}">
+      <button class="btn" data-act="savetok">Save &amp; load</button>${S.token ? `<button class="btn alt" data-act="forget">Forget token</button>` : ""}</div>`;
+    h += `<h2>Load local files</h2><div class="card"><div class="muted">Try things without the token: pick a ManaBox CSV and/or deck JSON files. Nothing leaves your device.</div>
+      <input type="file" id="local" multiple accept=".csv,.json"></div>`;
+    h += `<h2>Collection</h2>`;
+    if (!S.rows.length) h += `<div class="card muted">No collection loaded.</div>`;
+    else {
+      const byB = new Map(); let total = 0;
+      for (const r of S.rows) { byB.set(r.binder, (byB.get(r.binder) || 0) + r.qty); total += r.qty; }
+      const fr = new Set(S.cfg.freeBinders.map(norm)), mu = new Set(S.cfg.multiCopyBinders.map(norm));
+      h += `<div class="card"><b>${total}</b> cards · ${S.own.size} unique · ${esc(S.csvName)}${csvDate() ? " (" + csvDate() + ")" : ""}</div><table><tr><th>Binder</th><th>Cards</th><th></th></tr>` +
+        [...byB].sort((a, b) => b[1] - a[1]).map(([b, q]) => `<tr><td>${esc(b)}</td><td>${q}</td><td>${fr.has(norm(b)) ? '<span class="pill ok">free</span>' : mu.has(norm(b)) ? '<span class="pill ok">free (2+ copies)</span>' : '<span class="pill">locked</span>'}</td></tr>`).join("") + `</table>`;
+    }
+    h += `<h2>Card DB</h2><div class="card muted">${S.idx ? S.dbCount + " cards loaded from " + esc(S.cfg.dbUrl) : "Not loaded yet."}</div>`;
+    return h;
+  }
+
+  function emptyMsg(t) { return `<div class="card muted">${esc(t)}</div>`; }
+
+  function render() {
+    document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === S.tab));
+    let h = "";
+    if (S.error) h += `<div class="card lvl-error">${esc(S.error)}</div>`;
+    if (S.busy) h += `<div class="card muted">${esc(S.busy)}</div>`;
+    h += outBox();
+    h += { decks: vDecks, check: vCheck, trades: vTrades, wishlist: vWishlist, data: vData }[S.tab]();
+    $("#view").innerHTML = h;
+  }
+
+  /* ---------- events ---------- */
+  document.addEventListener("error", (ev) => {
+    const i = ev.target;
+    if (!i || i.tagName !== "IMG") return;
+    if (i.dataset.fb) { i.src = i.dataset.fb; delete i.dataset.fb; } else i.style.visibility = "hidden";
+  }, true);
+  document.addEventListener("click", async (ev) => {
+    const tabBtn = ev.target.closest("#tabs button");
+    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.out = null; if (S.tab !== "decks") S.deck = null; render(); window.scrollTo(0, 0); return; }
+    const el = ev.target.closest("[data-act]");
+    if (!el) return;
+    const a = el.dataset.act;
+    if (a === "toggle") { const o = el.querySelector("[data-o]"); if (o) o.hidden = !o.hidden; }
+    else if (a === "open") { S.deck = el.dataset.slug; render(); window.scrollTo(0, 0); }
+    else if (a === "back") { S.deck = null; render(); }
+    else if (a === "level") { S.level = el.dataset.l; render(); }
+    else if (a === "closeout") { S.out = null; render(); }
+    else if (a === "copy") { const ok = await copyText(S.out.text); el.textContent = ok ? "Copied ✓" : "Select the text and copy it manually"; }
+    else if (a === "download") download(S.out.filename, S.out.text);
+    else if (a === "exportdeck") {
+      const d = deckBySlug(el.dataset.slug);
+      const list = el.dataset.mode === "swaps" ? M.applySwaps(d, S.idx) : [...M.deckMap(d, S.idx).values()];
+      showOut((d.name || d.slug) + (el.dataset.mode === "swaps" ? " — with swaps applied" : " — current list"), M.deckText(list), d.slug + (el.dataset.mode === "swaps" ? "_swaps" : "") + ".txt");
+    }
+    else if (a === "tradecsv" || a === "tradetext") {
+      const sel = (S._trades || []).filter((t) => S.picked.has(t.key));
+      if (!sel.length) return;
+      if (a === "tradecsv") showOut("Trade binder — ManaBox CSV (" + sel.length + " cards)", M.tradesCSV(sel), "trade_binder.csv");
+      else showOut("Trade binder — text list", M.tradesText(sel), "trade_binder.txt");
+    }
+    else if (a === "tradeall") { const t = S._trades || []; S.picked = S.picked.size === t.length ? new Set() : new Set(t.map((x) => x.key)); render(); }
+    else if (a === "pick") { el.checked ? S.picked.add(el.dataset.key) : S.picked.delete(el.dataset.key); }
+    else if (a === "wishtext") showOut("Wishlist — still to find", (S._need || []).map((n) => "1 " + n).join("\n"), "wishlist.txt");
+    else if (a === "savetok") { S.token = $("#tok").value.trim(); try { localStorage.setItem("mtg_token", S.token); } catch (e) { /* ignore */ } loadAll(); }
+    else if (a === "forget") { S.token = ""; try { localStorage.removeItem("mtg_token"); } catch (e) { /* ignore */ } S.decks = []; S.rows = []; S.csvName = ""; recompute(); status(); render(); }
+  });
+  document.addEventListener("change", async (ev) => {
+    if (ev.target.id === "reserve") { S.reserve = Math.max(0, parseInt(ev.target.value, 10) || 0); S.picked = null; render(); }
+    else if (ev.target.id === "local") {
+      S.error = "";
+      try {
+        if (!S.idx) await loadDB();
+        for (const f of ev.target.files) {
+          const text = await f.text();
+          if (/\.csv$/i.test(f.name)) { S.rows = M.parseCollection(text); S.csvName = f.name; }
+          else {
+            const d = JSON.parse(text); d.slug = f.name.replace(/\.json$/i, "");
+            S.decks = S.decks.filter((x) => x.slug !== d.slug).concat(d);
+          }
+        }
+      } catch (e) { S.error = e.message; }
+      S.busy = ""; recompute(); status(); render();
+    }
+  });
+
+  status(); render();
+  if (S.token) loadAll();
+})();
