@@ -163,6 +163,9 @@
     if ((d.wishlist || []).length) {
       h += `<h3>Wishlist</h3>` + d.wishlist.map((w) => { const k = M.keyOf(S.idx, w.name); return cardRow(k, w.name, 1, "", false, ownPill(k, true), d) + (w.note ? `<div class="muted">${esc(w.note)}</div>` : ""); }).join("");
     }
+    if ((d.extras || []).length) {
+      h += `<h3>Display / extra cards (not in the 100)</h3>` + d.extras.map((x) => { const k = M.keyOf(S.idx, x.name); return cardRow(k, x.name, 1, "", false, `<span class="pill">${esc(x.note || "extra")}</span>`, d); }).join("");
+    }
     const groups = {};
     for (const [k, e] of m) { const info = M.cardInfo(S.idx, k); const isCmd = M.commandersOf(d).some((c) => M.keyOf(S.idx, c) === k); (groups[isCmd ? "Commander" : groupOf(info)] = groups[isCmd ? "Commander" : groupOf(info)] || []).push({ k, e, info }); }
     for (const g of TYPE_ORDER) {
