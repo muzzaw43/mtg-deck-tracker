@@ -177,6 +177,27 @@
     if (rc.looks.length) h += `<div><span class="pill pencil">${rc.looks.length} pencilled but ManaBox already shows them</span></div>${list(rc.looks)}`;
     return h + `</div>`;
   }
+  async function addSwap(slug) {
+    const d = deckBySlug(slug);
+    if (!d || !S.wtoken) return;
+    const inn = (prompt("Card coming IN (exact name):", "") || "").trim();
+    if (!inn) return;
+    const ki = M.resolve(S.idx, inn);
+    if (!ki) { S.error = `"${inn}" is not in the card DB — check the spelling (nothing saved).`; render(); return; }
+    const out = (prompt("Card going OUT (exact name from this deck; leave blank if undecided):", "") || "").trim();
+    let ko = "";
+    if (out) {
+      ko = M.resolve(S.idx, out) || "";
+      if (!ko || !M.deckMap(d, S.idx).has(ko)) { S.error = `"${out}" isn't in this deck's list (nothing saved).`; render(); return; }
+    }
+    if (!confirm(`Add a pencilled swap to ${d.name}?\n\nIN: ${ki}\nOUT: ${ko || "undecided"}`)) return;
+    d.pencilled = d.pencilled || [];
+    d.pencilled.push({ out: ko, in: ki, status: "pencilled", note: "", log: [{ at: new Date().toISOString().slice(0, 10), by: S.who || "me", act: "Added" }] });
+    S.error = ""; S.saving = "Saving…"; render();
+    try { await saveDeck(d, `Swap (${d.name || d.slug}): Added ${ki}${ko ? " for " + ko : ""}${S.who ? " [" + S.who + "]" : ""}`); S.saving = ""; recompute(); }
+    catch (e) { d.pencilled.pop(); S.error = e.message; S.saving = ""; }
+    status(); render();
+  }
   async function swapAction(slug, i, act) {
     const d = deckBySlug(slug), p = d && (d.pencilled || [])[i];
     if (!p) return;
@@ -191,9 +212,18 @@
       if (!confirm(`${SW_TEXT.undo}\n\n${label}\nBack to: ${prevOf(e)}${e.fromIn ? " (IN: " + e.fromIn + ")" : ""}`)) return;
       p.status = prevOf(e);
       if (e.fromIn !== undefined) p.in = e.fromIn;
+      if (e.fromOut !== undefined) p.out = e.fromOut;
       if (e.noteBefore !== undefined) p.note = e.noteBefore;
       p.log = p.log.filter((_, n) => n !== k);
       msg = "Undid: " + e.act;
+    } else if (act === "changeout") {
+      const nm = (prompt("Which card goes OUT? (exact name from this deck)", "") || "").trim();
+      if (!nm) return;
+      const k = M.resolve(S.idx, nm);
+      if (!k || !M.deckMap(d, S.idx).has(k)) { S.error = `"${nm}" isn't in this deck's list (nothing saved).`; render(); return; }
+      if (!confirm(`Set the OUT card?\n\nWas: ${p.out || "undecided"}\nNow: ${k}`)) return;
+      entry = { at, by, act: "Set OUT to " + k, prev: status0, fromOut: p.out || "", noteBefore: p.note || "" };
+      p.out = k; msg = entry.act;
     } else if (act === "change") {
       const nm = (prompt("Which card went IN instead? (exact name; blank to keep " + (p.in || "none") + ")", "") || "").trim();
       if (!nm) return;
@@ -327,7 +357,7 @@
     const mode = S.rbmode || "swaps", list = rebuildList(d), al = M.allocateDeck(d, list, S.own, S.cfg);
     const got = al.lines.reduce((s, l) => s + l.qty, 0), want = list.reduce((s, c) => s + c.qty, 0);
     let h = `<h3>Rebuild from collection</h3><div class="card"><div class="muted">Builds a ManaBox import for this deck from copies you own: ones already in this deck, then free binders. Choose a printing where you own more than one.</div>
-      <select id="rbmode"><option value="swaps"${mode === "swaps" ? " selected" : ""}>List with confirmed changes (approved + made)</option><option value="physical"${mode === "physical" ? " selected" : ""}>List as it is physically (made swaps applied)</option><option value="current"${mode === "current" ? " selected" : ""}>List as ManaBox shows it now</option></select>
+      <select id="rbmode"><option value="swaps"${mode === "swaps" ? " selected" : ""}>List with confirmed changes</option><option value="physical"${mode === "physical" ? " selected" : ""}>List as it is physically</option><option value="current"${mode === "current" ? " selected" : ""}>List as ManaBox shows it now</option></select>
       <div style="margin-top:6px"><span class="pill ${got === want ? "ok" : "warn"}">${got} of ${want} cards found</span></div>`;
     if (al.short.length) h += al.short.map((x) => `<div class="muted">✗ ${esc(x.name)}${x.need > 1 ? " ×" + x.need : ""} — ${esc(x.why)}</div>`).join("");
     const cf = M.pickConflicts(S.decks, d, al, S.own, S.cfg);
@@ -364,7 +394,7 @@
       const i = (d.pencilled || []).indexOf(p), st = M.pencilStatus(p);
       const und = lastUndo(p) >= 0 ? btn(i, "undo", "Undo last change", 1) : "";
       const btns = !S.wtoken ? "" : st === "made" ? btn(i, "done", "Mark done") + btn(i, "change", "Different card", 1) + btn(i, "cancel", "Cancel", 1) + und
-        : (st === "approved" ? "" : btn(i, "approve", "Approve")) + btn(i, "made", "I made it") + btn(i, "change", "Different card", 1) + btn(i, "cancel", "Cancel", 1) + und;
+        : (st === "approved" ? "" : btn(i, "approve", "Approve")) + btn(i, "made", "I made it") + btn(i, "change", "Different card", 1) + (p.out ? "" : btn(i, "changeout", "Choose cut", 1)) + btn(i, "cancel", "Cancel", 1) + und;
       let x = `<div class="card"><span class="pill ${cls}">${esc(p.status || "pencilled")}</span> ${p.note ? `<span class="muted">${esc(p.note)}</span>` : ""}`;
       if (p.out) x += `<div class="muted">OUT</div>` + cardRow(M.keyOf(S.idx, p.out), p.out, 1, "out", true, "", d);
       if (p.in) { const k = M.keyOf(S.idx, p.in); x += `<div class="muted">IN</div>` + cardRow(k, p.in, 1, "in", true, ownPill(k, true), d); }
@@ -374,6 +404,7 @@
     if (!S.wtoken && (mades.length || pencils.length)) h += `<div class="muted">Read-only. Add a write token in Data to confirm, change or cancel swaps here.</div>`;
     if (mades.length) h += `<h3>Made by hand — update ManaBox (${mades.length})</h3>` + swapBlock(mades, "todo");
     if (pencils.length) h += `<h3>Pencilled swaps (${pencils.length})</h3>` + swapBlock(pencils, "pencil");
+    if (S.wtoken) h += `<button class="btn alt" data-act="addswap" data-slug="${esc(d.slug)}">+ Add a swap</button>`;
     const hist = (d.pencilled || []).map((p, i) => ({ p, i })).filter((x) => ["done", "dropped"].includes(M.pencilStatus(x.p)));
     if (hist.length) {
       const mm = M.deckMap(d, S.idx);
@@ -521,7 +552,7 @@
       const d = deckBySlug(el.dataset.slug);
       const mode = el.dataset.mode;
       const list = mode === "swaps" ? M.applySwaps(d, S.idx, { only: ["approved", "made"] }) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
-      const label = { swaps: " — with confirmed changes (approved + made)", physical: " — as it is physically", current: " — list in ManaBox" }[mode];
+      const label = { swaps: " — with confirmed changes", physical: " — as it is physically", current: " — list in ManaBox" }[mode];
       showOut((d.name || d.slug) + label, M.deckText(sortCards(d, list)), d.slug + (mode === "current" ? "" : "_" + mode) + ".txt");
     }
     else if (a === "tradecsv" || a === "tradetext") {
@@ -535,6 +566,7 @@
     else if (a === "wishtext") showOut("Wishlist — still to find", (S._need || []).map((n) => "1 " + n).join("\n"), "wishlist.txt");
     else if (a === "savetok") { S.token = $("#tok").value.trim(); try { localStorage.setItem("mtg_token", S.token); } catch (e) { /* ignore */ } loadAll(); }
     else if (a === "bulkdone") bulkDone();
+    else if (a === "addswap") addSwap(el.dataset.slug);
     else if (a === "rebuildcsv" || a === "rebuildtext") {
       const d = deckBySlug(el.dataset.slug), al = M.allocateDeck(d, rebuildList(d), S.own, S.cfg);
       if (a === "rebuildcsv") showOut((d.name || d.slug) + " — rebuild from collection (ManaBox CSV)", M.rebuildCSV(d, sortCards(d, al.lines)), d.slug + "_rebuild.csv");
