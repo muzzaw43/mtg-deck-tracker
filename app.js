@@ -421,6 +421,11 @@
       <div class="chips vt"><button data-act="statsmode" data-v="swaps" class="${mode === "swaps" ? "on" : ""}">With confirmed changes</button><button data-act="statsmode" data-v="current" class="${mode === "current" ? "on" : ""}">As ManaBox shows it</button></div>
       <div class="muted">${st.total} cards plus ${st.commander.length ? esc(st.commander.map((c) => c.name).join(" + ")) : "no commander set"}. The commander isn't counted below.${st.unknown.length ? ` Not in the DB: ${esc(st.unknown.join(", "))}.` : ""}</div>`;
     h += `<h3>Command Zone template</h3><div class="muted">Roles are guessed from each card's text and can overlap (a card can count in two rows). Open a row, tap a card, and switch its roles if the guess is wrong.</div>`;
+    const base = Object.assign({}, (S.cfg && S.cfg.template) || M.DEFAULT_CONFIG.template), custom = d.targets && Object.keys(d.targets).length;
+    if (S.tgtEdit === d.slug) {
+      h += `<div class="card"><b>Targets for this deck</b>` + ["lands", "ramp", "draw", "targeted", "mass", "plan"].map((k) => `<div class="row"><span>${ROLE_LABEL[k]}</span><span><button class="btn alt" data-act="tgt" data-r="${k}" data-v="-1">−</button> <b>${T[k]}</b> <button class="btn alt" data-act="tgt" data-r="${k}" data-v="1">+</button></span></div>`).join("") +
+        `<div><button class="btn" data-act="tgtsave" data-slug="${esc(d.slug)}">Save targets</button><button class="btn alt" data-act="tgtreset" data-slug="${esc(d.slug)}">Back to standard</button><button class="btn alt" data-act="tgtcancel">Cancel</button></div></div>`;
+    } else h += `<div class="muted">${custom ? "Custom targets for this deck (standard: " + ["lands", "ramp", "draw", "targeted", "mass"].map((k) => base[k]).join("/") + ")." : "Standard Command Zone targets."} ${S.wtoken ? `<button class="btn alt" data-act="tgtedit" data-slug="${esc(d.slug)}">Edit targets</button>` : ""}</div>`;
     for (const k of ["lands", "ramp", "draw", "targeted", "mass", "plan"]) {
       const have = st.counts[k], want = T[k], diff = have - want, pct = Math.min(100, Math.round((have / (want || 1)) * 100));
       const cls = k === "plan" ? "" : have >= want ? "ok" : have >= want - 1 ? "warn" : "err";
@@ -782,6 +787,17 @@
         try { await saveDeck(d, `Card roles (${d.name || d.slug}): ${k}${S.who ? " [" + S.who + "]" : ""}`); S.saving = ""; }
         catch (e) { if (was) d.roles[k] = was; else delete d.roles[k]; S.error = e.message; S.saving = ""; }
       }
+      render();
+    }
+    else if (a === "tgtedit") { const d = deckBySlug(el.dataset.slug); S.tgtEdit = d.slug; S.tgtPrev = d.targets ? { ...d.targets } : undefined; d.targets = Object.assign({}, (S.cfg && S.cfg.template) || M.DEFAULT_CONFIG.template, d.targets || {}); render(); }
+    else if (a === "tgt") { const d = deckBySlug(S.tgtEdit), r = el.dataset.r; d.targets[r] = Math.max(0, d.targets[r] + Number(el.dataset.v)); render(); }
+    else if (a === "tgtcancel") { const d = deckBySlug(S.tgtEdit); if (S.tgtPrev) d.targets = S.tgtPrev; else delete d.targets; S.tgtEdit = null; render(); }
+    else if (a === "tgtsave" || a === "tgtreset") {
+      const d = deckBySlug(el.dataset.slug), prev = S.tgtPrev, base = (S.cfg && S.cfg.template) || M.DEFAULT_CONFIG.template;
+      if (a === "tgtreset") delete d.targets; else { const o = {}; for (const k of Object.keys(base)) if (d.targets[k] !== base[k]) o[k] = d.targets[k]; if (Object.keys(o).length) d.targets = o; else delete d.targets; }
+      S.tgtEdit = null; S.saving = "Saving…"; render();
+      try { await saveDeck(d, `Stat targets (${d.name || d.slug})${S.who ? " [" + S.who + "]" : ""}`); S.saving = ""; }
+      catch (e) { if (prev) d.targets = prev; else delete d.targets; S.error = e.message; S.saving = ""; }
       render();
     }
     else if (a === "dview") { S.dview = el.dataset.v; try { localStorage.setItem("mtg_dview", S.dview); } catch (e) { /* ignore */ } render(); }

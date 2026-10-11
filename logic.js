@@ -506,7 +506,7 @@
     return out;
   }
   function deckStats(deck, idx, list, cfg) {
-    const tpl = (cfg && cfg.template) || DEFAULT_CONFIG.template, overrides = deck.roles || {};
+    const tpl = Object.assign({}, (cfg && cfg.template) || DEFAULT_CONFIG.template, deck.targets || {}), overrides = deck.roles || {};
     const cmd = new Set(commandersOf(deck).map((n) => keyOf(idx, n)));
     const st = {
       total: 0, nonLand: 0, lands: 0, unknown: [], commander: [], curve: Array(8).fill(0), mvSum: 0, types: {},
