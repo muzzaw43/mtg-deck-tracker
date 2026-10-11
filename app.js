@@ -486,16 +486,31 @@
     return h;
   }
 
+  // Why Own is higher than Spare: copies kept in multi-copy binders, in locked binders/decks, or claimed by planned/pencilled decks.
+  function keepReason(x) {
+    const o = S.own.get(x.key);
+    if (!o || x.total <= x.tradeable) return "";
+    const fr = new Set(S.cfg.freeBinders.map(norm)), mu = new Set(S.cfg.multiCopyBinders.map(norm)), parts = [];
+    for (const [b, q] of o.binders) {
+      const nb = norm(b);
+      if (fr.has(nb)) continue;
+      if (mu.has(nb)) parts.push(q >= 2 ? `1 stays in ${b} (only extras are spare)` : `${q} stays in ${b} (single copy)`);
+      else parts.push(`${q} locked in ${b}`);
+    }
+    if (x.soft) parts.push(`${x.soft} wanted by a planned or pencilled deck`);
+    if (S.reserve) parts.push(`${S.reserve} kept by your reserve setting`);
+    return parts.join(" · ");
+  }
   function vTrades() {
     if (!S.rows.length) return emptyMsg("Load a collection CSV first.");
     const t = M.buildTrades({ own: S.own, claims: S.claims, cfg: S.cfg, idx: S.idx }, S.reserve);
     if (!S.picked) S.picked = new Set(t.map((x) => x.key));
-    let h = `<h2>Trade candidates</h2><div class="muted">Spare copies in your free binders that no deck (built, planned or pencilled in) needs. Basics are skipped.</div>
+    let h = `<h2>Trade candidates</h2><div class="muted">Spare copies in your free binders that no deck (built, planned or pencilled in) needs. Basics are skipped. In "The Hobbit" and "Avatar" the first copy of a card stays put, so only extras count. Cards you own more of than the Spare number show why underneath.</div>
       <div class="row" style="margin-top:8px"><span>Keep this many spares of each</span><input type="number" min="0" value="${S.reserve}" id="reserve" style="width:70px"></div>`;
     if (!t.length) return h + `<div class="card">Nothing spare right now.</div>`;
     h += `<div><button class="btn" data-act="tradecsv">Export ManaBox CSV</button><button class="btn alt" data-act="tradetext">Export text list</button><button class="btn alt" data-act="tradeall">${S.picked.size === t.length ? "Untick all" : "Tick all"}</button></div>
       <table><tr><th></th><th>Card</th><th>Spare</th><th>Own</th></tr>` +
-      t.map((x) => `<tr><td><input type="checkbox" data-act="pick" data-key="${esc(x.key)}" ${S.picked.has(x.key) ? "checked" : ""}></td><td>${x.alloc[0] && x.alloc[0].sid ? `<img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(x.alloc[0].sid))}">` : ""}${esc(x.name)}</td><td>${x.tradeable}</td><td class="muted">${x.total}</td></tr>`).join("") + `</table>`;
+      t.map((x) => `<tr><td><input type="checkbox" data-act="pick" data-key="${esc(x.key)}" ${S.picked.has(x.key) ? "checked" : ""}></td><td>${x.alloc[0] && x.alloc[0].sid ? `<img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(x.alloc[0].sid))}">` : ""}${esc(x.name)}${keepReason(x) ? `<div class="muted">${esc(keepReason(x))}</div>` : ""}</td><td>${x.tradeable}</td><td class="muted">${x.total}</td></tr>`).join("") + `</table>`;
     S._trades = t;
     return h;
   }
