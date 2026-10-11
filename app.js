@@ -311,6 +311,36 @@
     }).join("");
   }
 
+  function rebuildList(d) {
+    const mode = S.rbmode || "swaps";
+    const list = mode === "swaps" ? M.applySwaps(d, S.idx) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
+    return list.map((c) => ({ key: c.key || M.keyOf(S.idx, c.name), name: c.name, qty: c.qty }));
+  }
+  function rebuildSection(d) {
+    if (!S.rows.length || !S.idx) return "";
+    const mode = S.rbmode || "swaps", list = rebuildList(d), al = M.allocateDeck(d, list, S.own, S.cfg);
+    const got = al.lines.reduce((s, l) => s + l.qty, 0), want = list.reduce((s, c) => s + c.qty, 0);
+    let h = `<h3>Rebuild from collection</h3><div class="card"><div class="muted">Builds a ManaBox import for this deck from copies you own: ones already in this deck, then free binders. Choose a printing where you own more than one.</div>
+      <select id="rbmode"><option value="swaps"${mode === "swaps" ? " selected" : ""}>List with all pencilled swaps applied</option><option value="physical"${mode === "physical" ? " selected" : ""}>List as it is physically (made swaps applied)</option><option value="current"${mode === "current" ? " selected" : ""}>List as ManaBox shows it now</option></select>
+      <div style="margin-top:6px"><span class="pill ${got === want ? "ok" : "warn"}">${got} of ${want} cards found</span></div>`;
+    if (al.short.length) h += al.short.map((x) => `<div class="muted">✗ ${esc(x.name)}${x.need > 1 ? " ×" + x.need : ""} — ${esc(x.why)}</div>`).join("");
+    const cf = M.pickConflicts(S.decks, d, al, S.own, S.cfg);
+    if (cf.length) h += cf.map((x) => `<div class="card lvl-warn">${esc(x)}</div>`).join("");
+    const multi = list.map((c) => ({ c, p: M.isBasic(c.name) ? [] : M.printings(S.own, c.key, d, S.cfg) })).filter((x) => x.p.length > 1);
+    if (multi.length) {
+      h += `<h3>Choose printings (${multi.length})</h3>`;
+      h += multi.map(({ c, p }) => {
+        const pk = (d.picks || {})[c.key], cur = pk ? M.printKeyOf(pk) : "";
+        const opts = p.map((x) => `<option value="${esc(x.k)}"${x.k === cur ? " selected" : ""}>${esc(String(x.set).toUpperCase())} #${esc(x.cn)}${/foil/i.test(x.foil) && !/normal/i.test(x.foil) ? " ★foil" : ""} · ${x.avail}× · ${esc([...x.where].join(", "))}</option>`).join("");
+        const used = al.lines.find((l) => l.key === c.key);
+        return `<div class="cardrow"><div class="t"><span class="n">${esc(c.name)}</span></div><select data-pick="${esc(c.key)}" data-slug="${esc(d.slug)}"><option value="">Auto${used && !pk ? " — " + esc(String(used.row.set).toUpperCase()) + " #" + esc(used.row.cn) : ""}</option>${opts}</select></div>`;
+      }).join("");
+    }
+    h += `<div style="margin-top:8px"><button class="btn" data-act="rebuildcsv" data-slug="${esc(d.slug)}">Export ManaBox CSV</button><button class="btn alt" data-act="rebuildtext" data-slug="${esc(d.slug)}">Export text list</button></div>`;
+    h += `<div class="muted">Picks are ${S.wtoken ? "saved to the deck" : "kept for this session only (add a write token to save them)"}. Test the import with a small deck first.</div></div>`;
+    return h;
+  }
+
   function vDeck(d) {
     if (!d) { S.deck = null; return vDecks(); }
     const m = M.deckMap(d, S.idx), pens = M.activePencils(d);
@@ -349,6 +379,7 @@
           ${S.wtoken && lastUndo(p) >= 0 ? `<button class="btn alt" data-act="swap" data-slug="${esc(d.slug)}" data-i="${i}" data-sw="undo">Undo</button>` : ""}</div>`;
       }).join("");
     }
+    h += rebuildSection(d);
     const wls = S.wlEval.filter((w) => (w.decks || []).includes(d.slug));
     if (wls.length) h += `<h3>Wishlist</h3>` + wls.map((w) => cardRow(w.key, w.name, 1, "", false, wishPill(w), d) + (w.note ? `<div class="muted">${esc(w.note)}</div>` : "")).join("");
     if ((d.wishlist || []).length) {
@@ -497,13 +528,31 @@
     else if (a === "wishtext") showOut("Wishlist — still to find", (S._need || []).map((n) => "1 " + n).join("\n"), "wishlist.txt");
     else if (a === "savetok") { S.token = $("#tok").value.trim(); try { localStorage.setItem("mtg_token", S.token); } catch (e) { /* ignore */ } loadAll(); }
     else if (a === "bulkdone") bulkDone();
+    else if (a === "rebuildcsv" || a === "rebuildtext") {
+      const d = deckBySlug(el.dataset.slug), al = M.allocateDeck(d, rebuildList(d), S.own, S.cfg);
+      if (a === "rebuildcsv") showOut((d.name || d.slug) + " — rebuild from collection (ManaBox CSV)", M.rebuildCSV(d, al.lines), d.slug + "_rebuild.csv");
+      else showOut((d.name || d.slug) + " — rebuild from collection (text)", M.rebuildText(al.lines), d.slug + "_rebuild.txt");
+    }
     else if (a === "swap") swapAction(el.dataset.slug, +el.dataset.i, el.dataset.sw);
     else if (a === "savewtok") { S.wtoken = $("#wtok").value.trim(); S.who = $("#who").value.trim(); try { localStorage.setItem("mtg_wtoken", S.wtoken); localStorage.setItem("mtg_who", S.who); } catch (e) { /* ignore */ } render(); }
     else if (a === "forgetw") { S.wtoken = ""; try { localStorage.removeItem("mtg_wtoken"); } catch (e) { /* ignore */ } render(); }
     else if (a === "forget") { S.token = ""; try { localStorage.removeItem("mtg_token"); } catch (e) { /* ignore */ } S.decks = []; S.rows = []; S.csvName = ""; recompute(); status(); render(); }
   });
   document.addEventListener("change", async (ev) => {
-    if (ev.target.id === "reserve") { S.reserve = Math.max(0, parseInt(ev.target.value, 10) || 0); S.picked = null; render(); }
+    if (ev.target.id === "rbmode") { S.rbmode = ev.target.value; render(); }
+    else if (ev.target.dataset && ev.target.dataset.pick) {
+      const d = deckBySlug(ev.target.dataset.slug), key = ev.target.dataset.pick, v = ev.target.value;
+      d.picks = d.picks || {};
+      const was = d.picks[key];
+      if (!v) delete d.picks[key]; else { const [sid, foil] = v.split("|"); d.picks[key] = { sid, foil }; }
+      if (S.wtoken) {
+        S.saving = "Saving…"; render();
+        try { await saveDeck(d, `Printing pick (${d.name || d.slug}): ${key}${S.who ? " [" + S.who + "]" : ""}`); S.saving = ""; recompute(); }
+        catch (e) { if (was) d.picks[key] = was; else delete d.picks[key]; S.error = e.message; S.saving = ""; }
+      }
+      render();
+    }
+    else if (ev.target.id === "reserve") { S.reserve = Math.max(0, parseInt(ev.target.value, 10) || 0); S.picked = null; render(); }
     else if (ev.target.id === "upcsv") { const f = ev.target.files[0]; if (f) uploadCollection(f); }
     else if (ev.target.id === "local") {
       S.error = "";

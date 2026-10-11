@@ -34,3 +34,4 @@ textarea{width:100%;min-height:120px;background:var(--bg);color:var(--text);bord
 .cardrow .n{display:flex;align-items:center}
 .pill.todo{color:var(--accent);border-color:var(--accent)}
 .lvl-todo{border-left:3px solid var(--pencil)}
+select{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit;margin-top:4px}

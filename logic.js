@@ -55,6 +55,7 @@
       binder: col("Binder Name"), btype: col("Binder Type"), name: col("Name"),
       set: col("Set code"), cn: col("Collector number"), foil: col("Foil"),
       qty: col("Quantity"), sid: col("Scryfall ID"), price: col("Purchase price"),
+      setName: col("Set name"), rarity: col("Rarity"), mbid: col("ManaBox ID"), cond: col("Condition"), lang: col("Language"),
     };
     if (c.name < 0 || c.qty < 0)
       throw new Error("This doesn't look like a ManaBox export (needs Name and Quantity columns).");
@@ -69,6 +70,7 @@
       qty: parseInt(get(r, c.qty), 10) || 0,
       sid: get(r, c.sid),
       price: get(r, c.price),
+      setName: get(r, c.setName), rarity: get(r, c.rarity), mbid: get(r, c.mbid), cond: get(r, c.cond), lang: get(r, c.lang),
     })).filter((x) => x.name && x.qty > 0);
   }
 
@@ -392,6 +394,81 @@
         lines.push([t.name, r.set, r.cn, r.foil, r.qty, r.sid].map(csvEscape).join(","));
     return lines.join("\n");
   }
+  /* ---------- Rebuild a deck from the collection (choose printings) ---------- */
+  // Rows of this card that could go in this deck: its own deck binder, free binders, and spare copies in multi-copy binders.
+  function eligibleRows(own, key, deck, cfg) {
+    const o = own && own.get(key);
+    if (!o) return [];
+    const free = new Set(cfg.freeBinders.map(norm)), multi = new Set(cfg.multiCopyBinders.map(norm)), mine = norm((deck && deck.name) || "");
+    const spare = new Map();
+    for (const [b, q] of o.binders) if (multi.has(norm(b))) spare.set(norm(b), Math.max(0, q - 1));
+    const out = [];
+    for (const r of o.rows) {
+      const nb = norm(r.binder);
+      let kind = "", avail = 0;
+      if (nb === mine) { kind = "this deck"; avail = r.qty; }
+      else if (free.has(nb)) { kind = "free"; avail = r.qty; }
+      else if (multi.has(nb)) { kind = "spare"; avail = Math.min(r.qty, spare.get(nb) || 0); spare.set(nb, (spare.get(nb) || 0) - avail); }
+      if (avail > 0) out.push({ ...r, avail, kind });
+    }
+    return out;
+  }
+  const printKey = (r) => (r.sid || "") + "|" + norm(r.foil);
+  const printKeyOf = (pk) => printKey({ sid: pk.sid, foil: pk.foil });
+  function printings(own, key, deck, cfg) {
+    const g = new Map();
+    for (const r of eligibleRows(own, key, deck, cfg)) {
+      const k = printKey(r), p = g.get(k) || { k, sid: r.sid, foil: r.foil, set: r.set, cn: r.cn, setName: r.setName, avail: 0, where: new Set() };
+      p.avail += r.avail; p.where.add(r.kind === "this deck" ? "in this deck" : r.binder); g.set(k, p);
+    }
+    return [...g.values()];
+  }
+  // list = [{key,name,qty}]. deck.picks[key] = {sid, foil} chooses a printing; otherwise prefer copies already in the deck, then free ones.
+  function allocateDeck(deck, list, own, cfg) {
+    const picks = deck.picks || {}, lines = [], short = [], used = new Map(), rank = { "this deck": 0, free: 1, spare: 2 };
+    for (const e of list) {
+      let need = e.qty;
+      const pk = picks[e.key];
+      const rows = eligibleRows(own, e.key, deck, cfg).sort((a, b) => {
+        const pa = pk && printKey(a) === printKey({ sid: pk.sid, foil: pk.foil }) ? 0 : 1, pb = pk && printKey(b) === printKey({ sid: pk.sid, foil: pk.foil }) ? 0 : 1;
+        return pa - pb || rank[a.kind] - rank[b.kind];
+      });
+      for (const r of rows) {
+        if (need <= 0) break;
+        const take = Math.min(need, r.avail - (used.get(r) || 0));
+        if (take > 0) { used.set(r, (used.get(r) || 0) + take); lines.push({ name: e.name, key: e.key, row: r, qty: take, picked: !!pk && printKey(r) === printKey({ sid: pk.sid, foil: pk.foil }) }); need -= take; }
+      }
+      if (need > 0) {
+        const o = own && own.get(e.key);
+        short.push({ name: e.name, need, why: !o ? "not in the collection" : "owned, but the rest are in other decks' binders" });
+      }
+    }
+    return { lines, short };
+  }
+  // Another deck picked the same printing and there aren't enough copies for both?
+  function pickConflicts(decks, deck, alloc, own, cfg) {
+    const out = [];
+    for (const l of alloc.lines) {
+      if (!l.picked) continue;
+      const k = printKey(l.row);
+      const others = decks.filter((d) => d !== deck && d.picks && d.picks[l.key] && printKey({ sid: d.picks[l.key].sid, foil: d.picks[l.key].foil }) === k);
+      if (!others.length) continue;
+      const supply = eligibleRows(own, l.key, deck, cfg).filter((r) => printKey(r) === k).reduce((s, r) => s + r.avail, 0);
+      if (supply < 1 + others.length) out.push(`${l.name}: this printing is also picked for ${others.map((d) => d.name).join(", ")} — only ${supply} available`);
+    }
+    return out;
+  }
+  const REBUILD_HEAD = ["Binder Name", "Binder Type", "Name", "Set code", "Set name", "Collector number", "Foil", "Rarity", "Quantity", "ManaBox ID", "Scryfall ID", "Purchase price", "Misprint", "Altered", "Signed", "Condition", "Language", "Proxy", "Purchase price currency"];
+  function rebuildCSV(deck, lines) {
+    const out = [REBUILD_HEAD.join(",")];
+    for (const l of lines) {
+      const r = l.row;
+      out.push([deck.name, "deck", r.name, r.set, r.setName, r.cn, r.foil, r.rarity, l.qty, r.mbid, r.sid, r.price, "", "", "", r.cond, r.lang, "", ""].map(csvEscape).join(","));
+    }
+    return out.join("\n");
+  }
+  const rebuildText = (lines) => lines.map((l) => `${l.qty} ${l.name} (${String(l.row.set).toUpperCase()}) ${l.row.cn}${/foil/i.test(l.row.foil) && !/normal/i.test(l.row.foil) ? " *F*" : ""}`).join("\n");
+
   const tradesText = (selected) =>
     selected.map((t) => `${t.alloc.reduce((s, r) => s + r.qty, 0)} ${t.name}`).join("\n");
 
@@ -407,6 +484,8 @@
   // Which printing to show: an explicit sid on the deck card, else an owned row (prefer one in a binder named like the deck), else none.
   function pickSid(own, idx, key, deck) {
     if (deck) {
+      const pk = deck.picks && deck.picks[key];
+      if (pk && SID.test(pk.sid || "")) return pk.sid;
       const c = (deck.cards || []).find((x) => x.sid && keyOf(idx, x.name) === key);
       if (c && SID.test(c.sid)) return c.sid;
     }
@@ -427,7 +506,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    buildClaims, sumQty, runChecks, buildTrades, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;
