@@ -659,12 +659,15 @@
     let h = `<h2>Collection</h2><div class="chips vt"><button data-act="colview" data-v="binders" class="${f.view === "binders" ? "on" : ""}">Binders</button><button data-act="colview" data-v="cards" class="${f.view === "cards" ? "on" : ""}">All cards</button></div>`;
     if (f.view === "binders") {
       const bs = M.binderSummary(S.rows);
-      h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders. Tap a binder to look inside.${S.csvName ? ` Collection updated ${esc(csvDate() || S.csvName)}.` : ""}</div><div class="tiles" style="margin-top:8px">` +
-        bs.map((b) => {
-          const dk = S.decks.find((d) => norm(d.name) === norm(b.name)), cmd = dk ? M.commandersOf(dk) : [];
-          const img = cmd.length ? artImg(M.keyOf(S.idx, cmd[0]), cmd[0], dk, "art_crop", "tileimg") : b.sid ? `<img class="tileimg" loading="lazy" alt="" src="${esc(M.artUrl(b.sid))}">` : "";
-          return `<div class="tile" data-act="colbinder" data-b="${esc(b.name)}">${img}<div class="tilein"><b>${esc(b.name)}</b><div class="muted">${b.qty} cards · ${b.unique} different${/deck/i.test(b.btype) ? " · deck" : ""}</div></div></div>`;
-        }).join("") + `</div>`;
+      h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders. Tap a binder to look inside.${S.csvName ? ` Collection updated ${esc(csvDate() || S.csvName)}.` : ""}</div></div>`;
+      const tile = (b) => {
+        const dk = S.decks.find((d) => norm(d.name) === norm(b.name)), cmd = dk ? M.commandersOf(dk) : [];
+        const img = cmd.length ? artImg(M.keyOf(S.idx, cmd[0]), cmd[0], dk, "art_crop", "tileimg") : b.sid ? `<img class="tileimg" loading="lazy" alt="" src="${esc(M.artUrl(b.sid))}">` : "";
+        return `<div class="tile" data-act="colbinder" data-b="${esc(b.name)}">${img}<div class="tilein"><b>${esc(b.name)}</b><div class="muted">${b.qty} cards · ${b.unique} different</div></div></div>`;
+      };
+      const isDeck = (b) => /deck/i.test(b.btype), plainB = bs.filter((b) => !isDeck(b)), deckB = bs.filter(isDeck);
+      h += `<h3>Collection binders (${plainB.length})</h3><div class="tiles">${plainB.map(tile).join("")}</div>`;
+      if (deckB.length) h += `<h3>Decks (${deckB.length})</h3><div class="tiles">${deckB.map(tile).join("")}</div>`;
       return h;
     }
     const sets = [...new Map(all.map((e) => [e.set, e.setName])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
