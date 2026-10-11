@@ -8,7 +8,7 @@
   const S = {
     tab: "decks", deck: null, token: "", cfg: { ...M.DEFAULT_CONFIG },
     idx: null, rows: [], csvName: "", own: new Map(), decks: [], claims: { hard: new Map(), soft: new Map() },
-    wtoken: "", who: "", statsOpen: false, statsMode: "swaps", statsRole: "", dview: "stacks", zoom: null, saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
+    wtoken: "", who: "", statsOpen: false, statsMode: "swaps", statsRole: "", dview: "stacks", zoom: null, rul: {}, col: { view: "binders", layout: "grid", q: "", colors: new Set(), cmode: "any", ci: new Set(), ciDeck: "", mv: new Set(), types: new Set(), rarity: new Set(), set: "", binder: "", foil: "", sort: "name", dir: 1, limit: 120, open: false }, saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
   };
   try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; S.dview = localStorage.getItem("mtg_dview") || "stacks"; } catch (e) { /* storage blocked */ }
 
@@ -574,13 +574,93 @@
   function zoomModal() {
     if (!S.zoom) return "";
     const d = deckBySlug(S.zoom.slug), k = S.zoom.key, info = M.cardInfo(S.idx, k), name = info ? info.name : k.replace(/^\?/, "");
-    const pr = M.pickSid(S.own, S.idx, k, d), o = S.own.get(k);
-    return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${artImg(k, name, d, "normal", "zimg")}${oracleBox(info, k)}
+    const pr = S.zoom.sid || M.pickSid(S.own, S.idx, k, d), o = S.own.get(k);
+    const zi = S.zoom.sid ? `<img class="zimg" alt="" src="${esc(M.artUrl(S.zoom.sid, "normal"))}" data-fb="${esc(M.artByName(name, "normal"))}">` : artImg(k, name, d, "normal", "zimg");
+    const copies = o ? `<div class="muted" style="margin-top:6px">Your copies</div>` + o.rows.map((r) => `<div class="muted">${r.qty}× ${esc(r.setName || r.set)} (${esc((r.set || "").toUpperCase())}) #${esc(r.cn)}${/foil|etched/i.test(r.foil || "") ? " · " + esc(r.foil) : ""} · ${esc(r.binder)}</div>`).join("") : "";
+    return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${zi}${oracleBox(info, k)}${copies}
+      <div id="rulings" class="rul" data-sid="${esc(pr || "")}"></div>
       <div>${ownPill(k, true)} ${o ? `<span class="muted">${[...o.binders].map(([b, q]) => esc(b) + " ×" + q).join(", ")}</span>` : ""}</div>
       ${info && d && !/\bLand\b/.test(info.frontType) ? `<div class="muted" style="margin-top:6px">Counts as (for ${esc(d.name || d.slug)}):</div><div class="chips">${M.ROLE_KEYS.map((r) => `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="${r}" class="${effRoles(d, k).includes(r) ? "on" : softRole(d, k, r) ? "maybe" : ""}">${{ ramp: "Ramp", draw: "Card advantage", targeted: "Targeted", mass: "Mass" }[r]}</button>`).join("")}${d.roles && d.roles[k] ? `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="auto">Reset to auto</button>` : ""}</div>` : ""}
       <button class="btn" data-act="closezoom">Close</button></div></div>`;
   }
   const norm = M.norm;
+  function rulHtml(list) {
+    if (!list) return `<div class="muted">Couldn't load rulings (needs internet).</div>`;
+    if (!list.length) return `<div class="muted">No rulings for this card.</div>`;
+    return `<div class="muted" style="margin-top:6px">Rulings (Scryfall)</div>` + list.map((r) => `<div class="rulrow"><span class="muted">${esc(r.published_at)}</span> ${esc(r.comment)}</div>`).join("");
+  }
+  async function fillRulings() {
+    const el = document.getElementById("rulings"); if (!el) return;
+    const sid = el.dataset.sid; if (!sid) { el.innerHTML = `<div class="muted">Rulings need a printing ID — this card isn't in the collection.</div>`; return; }
+    if (S.rul[sid]) { el.innerHTML = rulHtml(S.rul[sid]); return; }
+    el.innerHTML = `<div class="muted">Loading rulings…</div>`;
+    let list = null;
+    try { const r = await fetch(`https://api.scryfall.com/cards/${sid}/rulings`); if (r.ok) list = (await r.json()).data || []; } catch (e) { /* offline */ }
+    if (list) S.rul[sid] = list;
+    const now = document.getElementById("rulings"); if (now && now.dataset.sid === sid) now.innerHTML = rulHtml(list);
+  }
+
+  /* ---------- Collection tab ---------- */
+  const CF = () => S.col;
+  const COLS6 = ["W", "U", "B", "R", "G", "C"], COLNAME = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green", C: "Colourless" };
+  function colEntries() { if (!S._ce || S._ceRows !== S.rows || S._ceIdx !== S.idx) { S._ce = M.collectionEntries(S.rows, S.idx); S._ceRows = S.rows; S._ceIdx = S.idx; } return S._ce; }
+  function colFiltered() {
+    const f = CF(), fl = M.filterCollection(colEntries(), { ...f, ciActive: f.ci.size > 0 || !!f.ciDeck });
+    return M.sortCollection(fl, f.sort, f.dir);
+  }
+  function colActiveCount() {
+    const f = CF(); return [f.q, f.colors.size, f.ci.size || f.ciDeck, f.mv.size, f.types.size, f.rarity.size, f.set, f.binder, f.foil].filter(Boolean).length;
+  }
+  function colResults() {
+    const f = CF(), all = colEntries(), fl = colFiltered(), shown = fl.slice(0, f.limit);
+    const qty = fl.reduce((s, e) => s + e.qty, 0);
+    let h = `<div class="muted" style="margin:6px 0">${fl.length} of ${all.length} printings · ${qty} cards${f.binder ? ` · in <b>${esc(f.binder)}</b>` : ""}</div>`;
+    if (!fl.length) return h + `<div class="card">Nothing matches those filters.</div>`;
+    if (f.layout === "list") {
+      h += shown.map((e) => `<div class="cardrow" data-act="zoom" data-key="${esc(e.key)}" data-sid="${esc(e.sid)}" data-peek="${esc(e.key)}"><div class="t"><span class="n"><img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(e.sid) || M.artByName(e.name))}">${e.qty > 1 ? e.qty + "× " : ""}${esc(e.name)}</span><span class="muted">${esc(e.cost)}</span></div><div class="muted">${esc(e.type)} · ${esc(e.setName)} (${esc(e.set)}) #${esc(e.cn)}${e.rarity ? " · " + esc(e.rarity) : ""}${e.foil ? " · " + esc(e.foil) : ""}</div></div>`).join("");
+    } else {
+      h += `<div class="colgrid">` + shown.map((e) => `<div class="ct" data-act="zoom" data-key="${esc(e.key)}" data-sid="${esc(e.sid)}" data-peek="${esc(e.key)}"><img loading="lazy" alt="${esc(e.name)}" src="${esc(M.artUrl(e.sid, "normal") || M.artByName(e.name, "normal"))}"${e.sid ? ` data-fb="${esc(M.artByName(e.name, "normal"))}"` : ""}>${e.qty > 1 ? `<span class="qty">${e.qty}×</span>` : ""}${e.foil ? `<span class="tag foil">${esc(e.foil)}</span>` : ""}</div>`).join("") + `</div>`;
+    }
+    if (fl.length > shown.length) h += `<button class="btn" data-act="colmore">Show ${Math.min(120, fl.length - shown.length)} more</button>`;
+    return h;
+  }
+  function vCollection() {
+    if (!S.rows.length) return emptyMsg("No collection loaded yet. Add your read token in the Data tab.");
+    const f = CF(), all = colEntries();
+    const chip = (fld, v, label, on) => `<button data-act="colchip" data-f="${fld}" data-v="${esc(v)}" class="${on ? "on" : ""}">${label}</button>`;
+    const pipb = (fld, c, on) => chip(fld, c, `<span class="pip pip-${c}">${c}</span>`, on);
+    let h = `<h2>Collection</h2><div class="chips vt"><button data-act="colview" data-v="binders" class="${f.view === "binders" ? "on" : ""}">Binders</button><button data-act="colview" data-v="cards" class="${f.view === "cards" ? "on" : ""}">All cards</button></div>`;
+    if (f.view === "binders") {
+      const bs = M.binderSummary(S.rows);
+      h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders. Tap a binder to look inside.${S.csvName ? ` Collection updated ${esc(csvDate() || S.csvName)}.` : ""}</div><div class="tiles" style="margin-top:8px">` +
+        bs.map((b) => {
+          const dk = S.decks.find((d) => norm(d.name) === norm(b.name)), cmd = dk ? M.commandersOf(dk) : [];
+          const img = cmd.length ? artImg(M.keyOf(S.idx, cmd[0]), cmd[0], dk, "art_crop", "tileimg") : b.sid ? `<img class="tileimg" loading="lazy" alt="" src="${esc(M.artUrl(b.sid))}">` : "";
+          return `<div class="tile" data-act="colbinder" data-b="${esc(b.name)}">${img}<div class="tilein"><b>${esc(b.name)}</b><div class="muted">${b.qty} cards · ${b.unique} different${/deck/i.test(b.btype) ? " · deck" : ""}</div></div></div>`;
+        }).join("") + `</div>`;
+      return h;
+    }
+    const sets = [...new Map(all.map((e) => [e.set, e.setName])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    const binders = [...new Set(S.rows.map((r) => r.binder))].sort((a, b) => a.localeCompare(b));
+    const n = colActiveCount();
+    h += `<div class="row" style="margin-top:6px"><input type="text" id="colq" placeholder="Search name, type or card text…" value="${esc(f.q)}" autocomplete="off" style="flex:1"><button class="btn alt" data-act="colfilters">Filters${n ? " (" + n + ")" : ""}</button></div>`;
+    if (f.open) {
+      h += `<div class="card"><div class="muted">Colour</div><div class="chips">${COLS6.map((c) => pipb("colors", c, f.colors.has(c))).join("")}
+        <select data-cf="cmode"><option value="any" ${f.cmode === "any" ? "selected" : ""}>any of these</option><option value="all" ${f.cmode === "all" ? "selected" : ""}>all of these</option><option value="exact" ${f.cmode === "exact" ? "selected" : ""}>exactly these</option></select></div>
+        <div class="muted">Fits a commander (colour identity within)</div><div class="chips">${["W", "U", "B", "R", "G"].map((c) => pipb("ci", c, f.ci.has(c))).join("")}
+        <select data-cf="ciDeck"><option value="">or pick a deck…</option>${S.decks.filter((d) => M.commandersOf(d).length).map((d) => `<option value="${esc(d.slug)}" ${f.ciDeck === d.slug ? "selected" : ""}>${esc(d.name || d.slug)}</option>`).join("")}</select></div>
+        <div class="muted">Mana value</div><div class="chips">${[0, 1, 2, 3, 4, 5, 6, 7].map((v) => chip("mv", v, v === 7 ? "7+" : v, f.mv.has(v))).join("")}</div>
+        <div class="muted">Type</div><div class="chips">${M.TYPE_CHIPS.map((t) => chip("types", t, t, f.types.has(t))).join("")}</div>
+        <div class="muted">Rarity</div><div class="chips">${["common", "uncommon", "rare", "mythic"].map((t) => chip("rarity", t, t, f.rarity.has(t))).join("")}</div>
+        <div class="row"><select data-cf="set"><option value="">Any set</option>${sets.map(([c, nm]) => `<option value="${esc(c)}" ${f.set === c ? "selected" : ""}>${esc(nm)} (${esc(c)})</option>`).join("")}</select>
+        <select data-cf="binder"><option value="">Any binder</option>${binders.map((b) => `<option value="${esc(b)}" ${f.binder === b ? "selected" : ""}>${esc(b)}</option>`).join("")}</select>
+        <select data-cf="foil"><option value="">Foil or not</option><option value="foil" ${f.foil === "foil" ? "selected" : ""}>Foil only</option><option value="nonfoil" ${f.foil === "nonfoil" ? "selected" : ""}>Non-foil only</option></select></div>
+        <div><button class="btn alt" data-act="colclear">Clear all filters</button></div></div>`;
+    } else if (f.binder) h += `<div class="chips"><button class="on" data-act="colunbinder">Binder: ${esc(f.binder)} ✕</button></div>`;
+    h += `<div class="row"><span><select data-cf="sort">${[["name", "Name"], ["mv", "Mana value"], ["color", "Colour"], ["type", "Type"], ["set", "Set"], ["rarity", "Rarity"], ["qty", "Quantity"]].map(([v, t]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>Sort: ${t}</option>`).join("")}</select> <button class="btn alt" data-act="coldir">${f.dir > 0 ? "A→Z ↑" : "Z→A ↓"}</button></span>
+      <span class="chips vt" style="margin:0"><button data-act="collayout" data-v="grid" class="${f.layout === "grid" ? "on" : ""}">Images</button><button data-act="collayout" data-v="list" class="${f.layout === "list" ? "on" : ""}">List</button></span></div>`;
+    return h + `<div id="colres">${colResults()}</div>`;
+  }
 
   function issueHtml(i) {
     return `<div class="card lvl-${i.level}"><div class="row"><span>${i.card ? `<b>${esc(i.card)}</b> — ` : ""}${esc(i.msg)}</span></div>${i.deckName ? `<div class="muted">${esc(i.deckName)}</div>` : ""}</div>`;
@@ -686,9 +766,10 @@
     if (S.error) h += `<div class="card lvl-error">${esc(S.error)}</div>`;
     if (S.busy || S.saving) h += `<div class="card muted">${esc(S.busy || S.saving)}</div>`;
     h += outBox();
-    h += { decks: vDecks, check: vCheck, trades: vTrades, wishlist: vWishlist, data: vData }[S.tab]();
+    h += { decks: vDecks, collection: vCollection, check: vCheck, trades: vTrades, wishlist: vWishlist, data: vData }[S.tab]();
     h += zoomModal() + chooserModal();
     $("#view").innerHTML = h;
+    if (S.zoom) fillRulings();
     if (S.ch && S.ch.focus) { const q = $("#chq"); if (q) q.focus(); S.ch.focus = false; }
   }
 
@@ -699,10 +780,10 @@
   document.body.appendChild(peek);
   let holdTimer = 0, holdShown = false, startXY = null;
   S.noClickUntil = 0;
-  function peekShow(key) {
+  function peekShow(key, psid) {
     const d = S.ch ? deckBySlug(S.ch.slug) : S.deck ? deckBySlug(S.deck) : null;
     const nm = (M.cardInfo(S.idx, key) || { name: key.replace(/^\?/, "") }).name;
-    const sid = M.pickSid(S.own, S.idx, key, d);
+    const sid = psid || M.pickSid(S.own, S.idx, key, d);
     delete peek.dataset.fb;
     if (sid) peek.dataset.fb = M.artByName(nm, "normal");
     peek.style.visibility = "visible";
@@ -714,7 +795,7 @@
   document.addEventListener("mouseover", (ev) => {
     if (!canHover) return;
     const t = ev.target.closest && ev.target.closest("[data-peek]");
-    if (t) { peek.className = ""; peekShow(t.dataset.peek); } else peekHide();
+    if (t) { peek.className = ""; peekShow(t.dataset.peek, t.dataset.sid); } else peekHide();
   });
   document.addEventListener("mousemove", (ev) => {
     if (peek.style.display !== "block" || peek.className) return;
@@ -730,7 +811,7 @@
     if (!t) return;
     const p = ev.touches[0]; startXY = [p.clientX, p.clientY]; holdShown = false;
     clearTimeout(holdTimer);
-    holdTimer = setTimeout(() => { holdShown = true; peek.className = "touch"; peek.style.left = ""; peek.style.top = ""; peekShow(t.dataset.peek || t.dataset.key); }, 350);
+    holdTimer = setTimeout(() => { holdShown = true; peek.className = "touch"; peek.style.left = ""; peek.style.top = ""; peekShow(t.dataset.peek || t.dataset.key, t.dataset.sid); }, 350);
   }, { passive: true });
   document.addEventListener("touchmove", (ev) => {
     if (!startXY || holdShown) return;
@@ -803,8 +884,17 @@
       catch (e) { if (prev) d.targets = prev; else delete d.targets; S.error = e.message; S.saving = ""; }
       render();
     }
+    else if (a === "colview") { CF().view = el.dataset.v; render(); }
+    else if (a === "collayout") { CF().layout = el.dataset.v; CF().limit = 120; render(); }
+    else if (a === "colfilters") { CF().open = !CF().open; render(); }
+    else if (a === "colmore") { CF().limit += 120; $("#colres").innerHTML = colResults(); }
+    else if (a === "coldir") { CF().dir *= -1; render(); }
+    else if (a === "colbinder") { const f = CF(); f.binder = el.dataset.b; f.view = "cards"; f.limit = 120; render(); window.scrollTo(0, 0); }
+    else if (a === "colunbinder") { CF().binder = ""; CF().limit = 120; render(); }
+    else if (a === "colclear") { const f = CF(); Object.assign(f, { q: "", colors: new Set(), ci: new Set(), ciDeck: "", mv: new Set(), types: new Set(), rarity: new Set(), set: "", binder: "", foil: "", limit: 120 }); render(); }
+    else if (a === "colchip") { const f = CF(), s = f[el.dataset.f], v = el.dataset.f === "mv" ? +el.dataset.v : el.dataset.v; if (s.has(v)) s.delete(v); else s.add(v); if (el.dataset.f === "ci") f.ciDeck = ""; f.limit = 120; render(); }
     else if (a === "dview") { S.dview = el.dataset.v; try { localStorage.setItem("mtg_dview", S.dview); } catch (e) { /* ignore */ } render(); }
-    else if (a === "zoom") { openModalNav(); S.zoom = { key: el.dataset.key, slug: el.dataset.slug }; render(); }
+    else if (a === "zoom") { openModalNav(); S.zoom = { key: el.dataset.key, slug: el.dataset.slug, sid: el.dataset.sid || "" }; render(); }
     else if (a === "closezoom") { S.zoom = null; popNav("modal"); render(); }
     else if (a === "noop") { /* keep modal open */ }
     else if (a === "addswap") addSwap(el.dataset.slug);
@@ -832,9 +922,16 @@
     else if (a === "forget") { S.token = ""; try { localStorage.removeItem("mtg_token"); } catch (e) { /* ignore */ } S.decks = []; S.rows = []; S.csvName = ""; recompute(); status(); render(); }
   });
   document.addEventListener("input", (ev) => {
+    if (ev.target.id === "colq") { CF().q = ev.target.value; CF().limit = 120; peekHide(); clearTimeout(S._colT); S._colT = setTimeout(() => { const r = $("#colres"); if (r) r.innerHTML = colResults(); }, 150); return; }
     if (ev.target.id === "chq" && S.ch) { S.ch.q = ev.target.value; peekHide(); $("#chres").innerHTML = chooserResults(); }
   });
   document.addEventListener("change", async (ev) => {
+    if (ev.target.dataset && ev.target.dataset.cf) {
+      const f = CF(), k = ev.target.dataset.cf, v = ev.target.value;
+      if (k === "ciDeck") { f.ciDeck = v; f.ci = new Set(); const dk = S.decks.find((d) => d.slug === v); if (dk) { const cmd = M.commandersOf(dk); const set = new Set(); cmd.forEach((c) => { const i = M.cardInfo(S.idx, M.keyOf(S.idx, c)); if (i) i.ci.forEach((x) => set.add(x)); }); f.ci = set; f.ciDeck = v; } }
+      else if (k === "sort") f.sort = v; else f[k] = v;
+      f.limit = 120; render(); return;
+    }
     if (ev.target.id === "rbmode") { S.rbmode = ev.target.value; render(); }
     else if (ev.target.dataset && ev.target.dataset.pick) {
       const d = deckBySlug(ev.target.dataset.slug), key = ev.target.dataset.pick, v = ev.target.value;

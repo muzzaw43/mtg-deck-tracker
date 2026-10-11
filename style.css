@@ -113,3 +113,11 @@ div.scimg{display:flex;align-items:center;justify-content:center;text-align:cent
 [data-peek] img,.ac img,.sc img,.tile img,.hero img,.mbox img,#peek{pointer-events:none;-webkit-touch-callout:none;-webkit-user-drag:none;user-select:none}
 
 .chips button.maybe{border-style:dashed;opacity:.8}
+
+.colgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.ct{position:relative;cursor:pointer}.ct img{display:block;width:100%;border-radius:6px;background:var(--line);aspect-ratio:488/680}
+.ct .qty{position:absolute;right:4px;top:4px;background:rgba(0,0,0,.75);color:#fff;border-radius:99px;padding:1px 7px;font-size:12px}
+.ct .tag.foil{position:absolute;left:4px;bottom:4px;background:rgba(80,40,160,.85);color:#fff;border-radius:4px;padding:0 5px;font-size:10px}
+.rul{margin-top:8px;font-size:13px}.rulrow{margin:5px 0;padding-left:8px;border-left:2px solid var(--line)}
+select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;margin:2px 4px 2px 0;max-width:100%}
+#colq{padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);font:inherit}

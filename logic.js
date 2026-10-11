@@ -108,6 +108,9 @@
       mv: faces[0].manaValue,
       ci,
       text: faces.map((f) => (faces.length > 1 && f.faceName ? f.faceName + ": " : "") + (f.text || "")).join("\n——\n"),
+      colors: (faces[0].colors || "").split(",").map((s) => s.trim()).filter(Boolean),
+      pt: faces[0].power != null && faces[0].power !== "" ? faces[0].power + "/" + faces[0].toughness : "",
+      keywords: faces.map((f) => f.keywords || "").filter(Boolean).join(", "),
       anyNumber: faces.some((f) => /any number of cards named/i.test(f.text || "")),
     };
   }
@@ -471,6 +474,81 @@
   }
   const rebuildText = (lines) => lines.map((l) => `${l.qty} ${l.name} (${String(l.row.set).toUpperCase()}) ${l.row.cn}${/foil/i.test(l.row.foil) && !/normal/i.test(l.row.foil) ? " *F*" : ""}`).join("\n");
 
+
+  /* ---------- Collection browser: one entry per owned printing, plus filter + sort ---------- */
+  const WUBRG = ["W", "U", "B", "R", "G"], RARITY_ORDER = { common: 0, uncommon: 1, rare: 2, mythic: 3, special: 4, bonus: 5 };
+  function collectionEntries(rows, idx) {
+    const m = new Map();
+    for (const r of rows) {
+      const key = keyOf(idx, r.name), id = [key, (r.set || "").toLowerCase(), r.cn, /foil|etched/i.test(r.foil || "") ? "f" : "n"].join("|");
+      let e = m.get(id);
+      if (!e) {
+        const info = cardInfo(idx, key);
+        e = { id, key, name: info ? plainName(info.name) : r.name, set: (r.set || "").toUpperCase(), setName: r.setName || (r.set || "").toUpperCase(), cn: r.cn, foil: /foil|etched/i.test(r.foil || "") ? (r.foil || "foil").toLowerCase() : "",
+          rarity: (r.rarity || "").toLowerCase(), qty: 0, sid: r.sid, binders: new Map(), cond: r.cond, lang: r.lang, info, known: !!info,
+          type: info ? info.type : "", frontType: info ? info.frontType : "", mv: info ? Math.floor(info.mv || 0) : -1, ci: info ? info.ci : [], colors: info ? info.colors : [],
+          cost: info ? info.cost : "", text: info ? info.text : "", pt: info ? info.pt : "", keywords: info ? info.keywords : "" };
+        m.set(id, e);
+      }
+      e.qty += r.qty; e.binders.set(r.binder, (e.binders.get(r.binder) || 0) + r.qty);
+      if (!e.sid && r.sid) e.sid = r.sid;
+    }
+    return [...m.values()];
+  }
+  const plainName = (n) => (n || "").split(" // ").length === 2 && n.split(" // ")[0] === n.split(" // ")[1] ? n.split(" // ")[0] : n;
+  const TYPE_CHIPS = ["Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Land", "Battle"];
+  function filterCollection(entries, f) {
+    const toks = (f.q || "").toLowerCase().split(/\s+/).filter(Boolean);
+    const sel = (s) => (s && s.size ? s : null);
+    const cols = sel(f.colors), ci = f.ciActive ? (f.ci || new Set()) : sel(f.ci), mvs = sel(f.mv), types = sel(f.types), rars = sel(f.rarity);
+    return entries.filter((e) => {
+      if (f.binder && !e.binders.has(f.binder)) return false;
+      if (f.set && e.set !== f.set) return false;
+      if (f.foil === "foil" && !e.foil) return false;
+      if (f.foil === "nonfoil" && e.foil) return false;
+      if (rars && !rars.has(e.rarity)) return false;
+      if (types && ![...types].some((t) => e.frontType.includes(t))) return false;
+      if (mvs && !(mvs.has(Math.min(7, Math.max(0, e.mv))) && e.mv >= 0)) return false;
+      if (cols) {
+        const c = e.colors, hasC = !c.length, want = [...cols].filter((x) => x !== "C"), wantC = cols.has("C");
+        const mode = f.cmode || "any";
+        if (mode === "any") { if (!(want.some((x) => c.includes(x)) || (wantC && hasC))) return false; }
+        else if (mode === "all") { if (!want.every((x) => c.includes(x)) || (wantC && !hasC)) return false; }
+        else if (mode === "exact") { if (wantC ? !(hasC && !want.length) : !(c.length === want.length && want.every((x) => c.includes(x)))) return false; }
+      }
+      if (ci && !e.ci.every((x) => ci.has(x))) return false;
+      if (toks.length) {
+        const hay = (e.name + "\n" + e.type + "\n" + e.text + "\n" + e.keywords).toLowerCase();
+        if (!toks.every((t) => hay.includes(t))) return false;
+      }
+      return true;
+    });
+  }
+  function sortCollection(list, by, dir) {
+    const colRank = (e) => (e.colors.length ? (e.colors.length > 1 ? 10 : 0) + Math.min(...e.colors.map((c) => WUBRG.indexOf(c))) : 20);
+    const cnNum = (e) => parseInt(e.cn, 10) || 0;
+    const cmp = {
+      name: (a, b) => a.name.localeCompare(b.name),
+      mv: (a, b) => a.mv - b.mv || a.name.localeCompare(b.name),
+      color: (a, b) => colRank(a) - colRank(b) || a.name.localeCompare(b.name),
+      set: (a, b) => a.setName.localeCompare(b.setName) || cnNum(a) - cnNum(b),
+      rarity: (a, b) => (RARITY_ORDER[a.rarity] ?? 9) - (RARITY_ORDER[b.rarity] ?? 9) || a.name.localeCompare(b.name),
+      type: (a, b) => a.frontType.localeCompare(b.frontType) || a.name.localeCompare(b.name),
+      qty: (a, b) => a.qty - b.qty || a.name.localeCompare(b.name),
+    }[by] || ((a, b) => a.name.localeCompare(b.name));
+    return list.slice().sort((a, b) => cmp(a, b) * (dir < 0 ? -1 : 1));
+  }
+  function binderSummary(rows) {
+    const m = new Map();
+    for (const r of rows) {
+      let b = m.get(r.binder);
+      if (!b) { b = { name: r.binder, btype: r.btype, qty: 0, names: new Set(), sid: "", rname: "" }; m.set(r.binder, b); }
+      b.qty += r.qty; b.names.add(r.name);
+      if (!b.sid && r.sid) { b.sid = r.sid; b.rname = r.name; }
+    }
+    return [...m.values()].map((b) => ({ ...b, unique: b.names.size })).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   /* ---------- Deck stats: roles (Command Zone template), mana curve, colour pips, sources ---------- */
   const ROLE_KEYS = ["ramp", "draw", "targeted", "mass"];
   // Best-guess roles from the card's DB text. Override per card with deck.roles[key] = [..].
@@ -657,7 +735,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    eligibleRows, printings, printKeyOf, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;
