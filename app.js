@@ -8,7 +8,7 @@
   const S = {
     tab: "decks", deck: null, token: "", cfg: { ...M.DEFAULT_CONFIG },
     idx: null, rows: [], csvName: "", own: new Map(), decks: [], claims: { hard: new Map(), soft: new Map() },
-    wtoken: "", who: "", dview: "stacks", zoom: null, saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
+    wtoken: "", who: "", statsOpen: false, statsMode: "swaps", statsRole: "", dview: "stacks", zoom: null, saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
   };
   try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; S.dview = localStorage.getItem("mtg_dview") || "stacks"; } catch (e) { /* storage blocked */ }
 
@@ -380,6 +380,49 @@
     return h;
   }
 
+  /* ---------- deck stats panel ---------- */
+  const ROLE_LABEL = { lands: "Lands", ramp: "Ramp", draw: "Card advantage", targeted: "Targeted disruption", mass: "Mass disruption", plan: "Plan cards" };
+  const ROLE_STAT = { lands: "land", ramp: "ramp", draw: "draw", targeted: "targeted", mass: "mass", plan: "plan" };
+  const COL_NAME = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green", C: "Colourless" };
+  function statsList(d) {
+    const mode = S.statsMode || "swaps";
+    const list = mode === "swaps" ? M.applySwaps(d, S.idx, { only: ["approved", "made"] }) : [...M.deckMap(d, S.idx).values()];
+    return list.map((c) => ({ key: c.key || M.keyOf(S.idx, c.name), name: c.name, qty: c.qty }));
+  }
+  function effRoles(d, key) {
+    const o = d.roles && d.roles[key];
+    return o ? o.filter((x) => M.ROLE_KEYS.includes(x)) : M.classifyRoles(M.cardInfo(S.idx, key));
+  }
+  function statsPanel(d) {
+    const mode = S.statsMode || "swaps", st = M.deckStats(d, S.idx, statsList(d), S.cfg), T = st.targets;
+    let h = `<div class="card stats"><div class="row"><b>Deck stats</b><button class="btn alt" data-act="stats">Close</button></div>
+      <div class="chips vt"><button data-act="statsmode" data-v="swaps" class="${mode === "swaps" ? "on" : ""}">With confirmed changes</button><button data-act="statsmode" data-v="current" class="${mode === "current" ? "on" : ""}">As ManaBox shows it</button></div>
+      <div class="muted">${st.total} cards plus ${st.commander.length ? esc(st.commander.map((c) => c.name).join(" + ")) : "no commander set"}. The commander isn't counted below.${st.unknown.length ? ` Not in the DB: ${esc(st.unknown.join(", "))}.` : ""}</div>`;
+    h += `<h3>Command Zone template</h3><div class="muted">Roles are guessed from each card's text and can overlap (a card can count in two rows). Open a row, tap a card, and switch its roles if the guess is wrong.</div>`;
+    for (const k of ["lands", "ramp", "draw", "targeted", "mass", "plan"]) {
+      const have = st.counts[k], want = T[k], diff = have - want, pct = Math.min(100, Math.round((have / (want || 1)) * 100));
+      const cls = k === "plan" ? "" : have >= want ? "ok" : have >= want - 1 ? "warn" : "err";
+      const open = S.statsRole === k;
+      h += `<div class="trow" data-act="statsrole" data-r="${k}"><div class="row"><span>${ROLE_LABEL[k]}</span><span><b>${have}</b> <span class="muted">/ ${k === "plan" ? "~" : ""}${want}</span> ${k === "plan" ? "" : `<span class="pill ${cls}">${diff >= 0 ? "+" + diff : diff}</span>`}</span></div><div class="bar"><i class="${cls}" style="width:${pct}%"></i></div></div>`;
+      if (open) {
+        const list = st.roles[ROLE_STAT[k]].map((x) => ({ ...x, name: (M.cardInfo(S.idx, x.key) || { name: x.key }).name })).sort((a, b) => a.name.localeCompare(b.name));
+        h += `<div class="chips">${list.map((x) => `<button data-act="zoom" data-key="${esc(x.key)}" data-slug="${esc(d.slug)}">${x.qty > 1 ? x.qty + "× " : ""}${esc(plain(x.name))}</button>`).join("") || `<span class="muted">None.</span>`}</div>`;
+      }
+    }
+    h += `<div class="muted">${st.multiRole} cards fill more than one role.</div>`;
+    const mx = Math.max(1, ...st.curve);
+    h += `<h3>Mana curve</h3><div class="curve">${st.curve.map((n, i) => `<div class="cv"><span>${n || ""}</span><i style="height:${Math.round((n / mx) * 90)}px"></i><em>${i === 7 ? "7+" : i}</em></div>`).join("")}</div>
+      <div class="muted">Average mana value ${st.avgMv.toFixed(2)} (spells only) · total ${st.mvSum} · ${st.nonLand} spells · ${st.lands} lands${st.commander.length ? ` · commander MV ${st.commander.map((c) => c.mv).join(" + ")}` : ""}</div>`;
+    const cols = ["W", "U", "B", "R", "G", "C"].filter((c) => st.pips[c] || st.srcLand[c] || st.srcOther[c]);
+    const pipT = cols.reduce((a, c) => a + st.pips[c], 0) || 1, srcMax = Math.max(1, ...cols.map((c) => st.srcLand[c] + st.srcOther[c]));
+    h += `<h3>Colour pips vs mana sources</h3><div class="muted">Pips = coloured mana symbols in the costs of your spells. Sources = lands plus rocks and creatures that can make that colour.</div>` +
+      cols.map((c) => `<div class="prow"><span class="pip pip-${c}">${c}</span><div class="pcol"><div class="bar"><i class="c${c}" style="width:${Math.round((st.pips[c] / pipT) * 100)}%"></i></div><div class="muted">${COL_NAME[c]}: ${st.pips[c]} pips (${Math.round((st.pips[c] / pipT) * 100)}%)</div></div>
+        <div class="pcol"><div class="bar"><i class="c${c}" style="width:${Math.round(((st.srcLand[c] + st.srcOther[c]) / srcMax) * 100)}%"></i></div><div class="muted">${st.srcLand[c]} lands + ${st.srcOther[c]} other = ${st.srcLand[c] + st.srcOther[c]} sources</div></div></div>`).join("");
+    h += `<h3>Card types</h3><div class="muted">${["Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Battle", "Land", "Other"].filter((t) => st.types[t]).map((t) => `${t} ${st.types[t]}`).join(" · ")}</div>`;
+    h += `<h3>Lands</h3><div class="muted">${st.lands} lands · ${st.tappedAlways} always enter tapped · ${st.tappedCond} enter tapped under some conditions (best guess from card text).</div></div>`;
+    return h;
+  }
+
   function vDeck(d) {
     if (!d) { S.deck = null; return vDecks(); }
     const m = M.deckMap(d, S.idx), pens = M.activePencils(d);
@@ -390,11 +433,11 @@
       <div class="hero">${ck ? artImg(ck, cmds[0], d, "art_crop", "heroimg") : ""}<div class="heroin"><div class="herot">${esc(d.name || d.slug)}</div>
       <div class="herom">${esc(cmds.join(" + "))}</div>
       <div class="herom">${esc(d.status || "planned")} · ${M.deckTotal(m)} cards${nMade ? ` · ${nMade} made by hand` : ""}${nPen ? ` · ${nPen} pencilled` : ""}${d.updated ? " · updated " + esc(d.updated) : ""}</div></div></div>
-      <div><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
+      <div><button class="btn" data-act="stats">${S.statsOpen ? "Hide stats" : "Deck stats"}</button><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
       ${pens.some((p) => M.pencilStatus(p) === "made") ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="physical">Export list as it is physically</button>` : ""}
       ${pens.some((p) => ["approved", "made"].includes(M.pencilStatus(p))) ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with confirmed changes</button>` : ""}</div>
       ${pens.some((p) => M.pencilStatus(p) === "pencilled") ? `<div class="muted">Pencilled swaps aren't in any export until you approve them.</div>` : ""}`;
-    const pre = h; h = "";
+    const pre = h + (S.statsOpen ? statsPanel(d) : ""); h = "";
     const is = issuesFor(d.slug);
     if (is.length) h += `<h3>Checks</h3>` + is.map(issueHtml).join("");
     const btn = (i, act, txt, alt) => `<button class="btn${alt ? " alt" : ""}" data-act="swap" data-slug="${esc(d.slug)}" data-i="${i}" data-sw="${act}">${txt}</button>`;
@@ -504,6 +547,7 @@
     const pr = M.pickSid(S.own, S.idx, k, d), o = S.own.get(k);
     return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${artImg(k, name, d, "normal", "zimg")}${oracleBox(info, k)}
       <div>${ownPill(k, true)} ${o ? `<span class="muted">${[...o.binders].map(([b, q]) => esc(b) + " ×" + q).join(", ")}</span>` : ""}</div>
+      ${info && d && !/\bLand\b/.test(info.frontType) ? `<div class="muted" style="margin-top:6px">Counts as (for ${esc(d.name || d.slug)}):</div><div class="chips">${M.ROLE_KEYS.map((r) => `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="${r}" class="${effRoles(d, k).includes(r) ? "on" : ""}">${{ ramp: "Ramp", draw: "Card advantage", targeted: "Targeted", mass: "Mass" }[r]}</button>`).join("")}${d.roles && d.roles[k] ? `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="auto">Reset to auto</button>` : ""}</div>` : ""}
       <button class="btn" data-act="closezoom">Close</button></div></div>`;
   }
   const norm = M.norm;
@@ -654,6 +698,20 @@
     else if (a === "wishtext") showOut("Wishlist — still to find", (S._need || []).map((n) => "1 " + n).join("\n"), "wishlist.txt");
     else if (a === "savetok") { S.token = $("#tok").value.trim(); try { localStorage.setItem("mtg_token", S.token); } catch (e) { /* ignore */ } loadAll(); }
     else if (a === "bulkdone") bulkDone();
+    else if (a === "stats") { S.statsOpen = !S.statsOpen; render(); }
+    else if (a === "statsmode") { S.statsMode = el.dataset.v; render(); }
+    else if (a === "statsrole") { S.statsRole = S.statsRole === el.dataset.r ? "" : el.dataset.r; render(); }
+    else if (a === "role") {
+      const d = deckBySlug(el.dataset.slug), k = el.dataset.key, r = el.dataset.r, cur = effRoles(d, k), was = d.roles ? d.roles[k] : undefined;
+      d.roles = d.roles || {};
+      if (r === "auto") delete d.roles[k]; else d.roles[k] = cur.includes(r) ? cur.filter((x) => x !== r) : cur.concat(r);
+      if (S.wtoken) {
+        S.saving = "Saving…"; render();
+        try { await saveDeck(d, `Card roles (${d.name || d.slug}): ${k}${S.who ? " [" + S.who + "]" : ""}`); S.saving = ""; }
+        catch (e) { if (was) d.roles[k] = was; else delete d.roles[k]; S.error = e.message; S.saving = ""; }
+      }
+      render();
+    }
     else if (a === "dview") { S.dview = el.dataset.v; try { localStorage.setItem("mtg_dview", S.dview); } catch (e) { /* ignore */ } render(); }
     else if (a === "zoom") { S.zoom = { key: el.dataset.key, slug: el.dataset.slug }; render(); }
     else if (a === "closezoom") { S.zoom = null; render(); }

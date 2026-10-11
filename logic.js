@@ -19,6 +19,8 @@
     freeBinders: ["Not in use", "edge of eternities"],
     // Free only for cards held 2+ times in that binder (one copy stays put, rest are free).
     multiCopyBinders: ["The Hobbit", "Avatar"],
+    // Command Zone category template (baseline count check for a 99 + commander deck).
+    template: { lands: 38, ramp: 10, draw: 12, targeted: 12, mass: 6, plan: 30 },
   };
 
   /* ---------- CSV ---------- */
@@ -469,6 +471,85 @@
   }
   const rebuildText = (lines) => lines.map((l) => `${l.qty} ${l.name} (${String(l.row.set).toUpperCase()}) ${l.row.cn}${/foil/i.test(l.row.foil) && !/normal/i.test(l.row.foil) ? " *F*" : ""}`).join("\n");
 
+  /* ---------- Deck stats: roles (Command Zone template), mana curve, colour pips, sources ---------- */
+  const ROLE_KEYS = ["ramp", "draw", "targeted", "mass"];
+  // Best-guess roles from the card's DB text. Override per card with deck.roles[key] = [..].
+  function classifyRoles(info) {
+    if (!info || /\bLand\b/.test(info.frontType)) return [];
+    const t = info.text || "", spell = /Instant|Sorcery/.test(info.frontType), r = [];
+    const ramp = (!spell && /:\s*Add\s+(\{|one |two |three |an amount)/i.test(t)) ||
+      (/search your library/i.test(t) && /(basic land|land|Plains|Island|Swamp|Mountain|Forest) cards?/i.test(t) && /battlefield/i.test(t)) ||
+      /put (a|an|up to \w+|any number of) (basic )?land cards? (from your hand )?onto the battlefield/i.test(t) ||
+      /create (a|an|\w+) Treasure tokens?/i.test(t);
+    if (ramp) r.push("ramp");
+    if (/\bdraws? (a|an|two|three|four|five|X|that many|\d+|cards? equal|\w+ additional) ?cards?/i.test(t) || /\bdraw (a|two|three) cards?/i.test(t) || /\binvestigate\b|create a Clue/i.test(t) ||
+      /look at the top (\w+ )?cards? of your library[^.]*(put|into your hand)/i.test(t) || /exile the top[^.]*you may (play|cast)/i.test(t) || /you may (play|cast)[^.]*from the top of your library/i.test(t)) r.push("draw");
+    if (/(destroy|exile) (up to \w+ |another |any number of )?target/i.test(t) || /counter target/i.test(t) || /return target [^.]*? to (its|their) owner'?s? hands?/i.test(t) ||
+      /deals? (\d+|X) damage to (any target|target)/i.test(t) || /target [^.]*? gets? -(\d|X)\/-/i.test(t) || /gain control of target/i.test(t) || /target (player|opponent) sacrifices/i.test(t)) r.push("targeted");
+    if (/(destroy|exile) all /i.test(t) || /each (other )?creature gets -\d/i.test(t) || /creatures (your opponents control|you don't control) get -/i.test(t) ||
+      /deals? \d+ damage to each (other )?(non\w+ )?creature/i.test(t) || /return all [^.]*? to (their|its) owners?'? hands?/i.test(t) || /each player sacrifices/i.test(t)) r.push("mass");
+    return r;
+  }
+  const COLS = ["W", "U", "B", "R", "G"], BASIC_COL = { Plains: "W", Island: "U", Swamp: "B", Mountain: "R", Forest: "G" };
+  function producedColours(info) {
+    const out = new Set(), t = info.text || "", land = /\bLand\b/.test(info.frontType);
+    if (land) for (const [n, c] of Object.entries(BASIC_COL)) if (new RegExp("\\b" + n + "\\b").test(info.type.split(" // ")[0])) out.add(c);
+    for (const m of t.matchAll(/Add ((?:\{[^}]+\})+)/gi)) for (const tok of m[1].matchAll(/\{([^}]+)\}/g)) {
+      const x = tok[1].toUpperCase();
+      if (COLS.includes(x)) out.add(x); else if (x === "C") out.add("C");
+    }
+    if (/Add (one|an additional one|X|that much|two|three)[^.]*mana of any (one )?(color|type)|mana of any color/i.test(t)) COLS.forEach((c) => out.add(c));
+    if (land) {
+      const f = /search your library for an? ([^.]*?) cards?/i.exec(t);
+      if (f) { if (/basic land/i.test(f[1])) COLS.forEach((c) => out.add(c)); else for (const [n, c] of Object.entries(BASIC_COL)) if (new RegExp("\\b" + n + "\\b").test(f[1])) out.add(c); }
+    }
+    return out;
+  }
+  function deckStats(deck, idx, list, cfg) {
+    const tpl = (cfg && cfg.template) || DEFAULT_CONFIG.template, overrides = deck.roles || {};
+    const cmd = new Set(commandersOf(deck).map((n) => keyOf(idx, n)));
+    const st = {
+      total: 0, nonLand: 0, lands: 0, unknown: [], commander: [], curve: Array(8).fill(0), mvSum: 0, types: {},
+      pips: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }, srcLand: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }, srcOther: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 },
+      tappedAlways: 0, tappedCond: 0, roles: { land: [], ramp: [], draw: [], targeted: [], mass: [], plan: [] }, multiRole: 0, targets: tpl,
+    };
+    const tally = (arr, key, n) => { if (!arr.find((x) => x.key === key)) arr.push({ key, qty: n }); };
+    for (const e of list) {
+      const info = cardInfo(idx, e.key), q = e.qty;
+      if (!info) { st.unknown.push(e.name); continue; }
+      if (cmd.has(e.key)) { st.commander.push({ name: info.name, mv: info.mv }); continue; }
+      st.total += q;
+      const front = info.frontType, isLand = /\bLand\b/.test(front);
+      let g = "Other";
+      if (isLand) g = "Land"; else for (const k of ["Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment"]) if (front.includes(k)) { g = k; break; }
+      st.types[g] = (st.types[g] || 0) + q;
+      const prod = producedColours(info);
+      if (isLand) {
+        st.lands += q; tally(st.roles.land, e.key, q);
+        for (const c of prod) st.srcLand[c] += q;
+        const sent = (info.text || "").split(/(?<=[.])\s/).find((x) => /enters (the battlefield )?tapped/i.test(x));
+        if (sent) { if (/unless|\bif\b|you may pay|reveal/i.test(sent)) st.tappedCond += q; else st.tappedAlways += q; }
+        continue;
+      }
+      st.nonLand += q;
+      const mv = Math.max(0, Math.floor(info.mv || 0));
+      st.curve[Math.min(7, mv)] += q; st.mvSum += mv * q;
+      for (const m of (info.cost.split(" // ")[0] || "").matchAll(/\{([^}]+)\}/g)) {
+        const cs = [...new Set(m[1].toUpperCase().match(/[WUBRG]/g) || [])];
+        if (cs.length) cs.forEach((c) => { st.pips[c] += q; }); else if (m[1].toUpperCase() === "C") st.pips.C += q;
+      }
+      if (prod.size) for (const c of prod) st.srcOther[c] += q;
+      const auto = classifyRoles(info), roles = overrides[e.key] ? overrides[e.key].filter((x) => ROLE_KEYS.includes(x)) : auto;
+      if (roles.length > 1) st.multiRole += q;
+      roles.forEach((r) => tally(st.roles[r], e.key, q));
+      if (!roles.length) tally(st.roles.plan, e.key, q);
+    }
+    st.avgMv = st.nonLand ? st.mvSum / st.nonLand : 0;
+    const n = (k) => st.roles[k].reduce((s2, x) => s2 + x.qty, 0);
+    st.counts = { lands: st.lands, ramp: n("ramp"), draw: n("draw"), targeted: n("targeted"), mass: n("mass"), plan: n("plan") };
+    return st;
+  }
+
   const tradesText = (selected) =>
     selected.map((t) => `${t.alloc.reduce((s, r) => s + r.qty, 0)} ${t.name}`).join("\n");
 
@@ -506,7 +587,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    eligibleRows, printings, printKeyOf, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, deckStats, classifyRoles, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;
