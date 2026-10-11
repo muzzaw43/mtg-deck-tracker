@@ -8,7 +8,7 @@
   const S = {
     tab: "decks", deck: null, token: "", cfg: { ...M.DEFAULT_CONFIG },
     idx: null, rows: [], csvName: "", own: new Map(), decks: [], claims: { hard: new Map(), soft: new Map() },
-    checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
+    log: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
   };
   try { S.token = localStorage.getItem("mtg_token") || ""; } catch (e) { /* storage blocked */ }
 
@@ -39,6 +39,12 @@
     S.error = ""; S.busy = "Loading…"; status(); render();
     try {
       if (!S.token) throw new Error("Paste your read-only GitHub token in Data to load your private decks and collection.");
+      S.log = [];
+      const rr = await fetch(`https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}`, { headers: { Authorization: "Bearer " + S.token, Accept: "application/vnd.github+json" } });
+      if (rr.status === 401) throw new Error("GitHub rejected the token (401) — it may be mistyped, expired or revoked. Make a new one and paste it in Data.");
+      if (rr.status === 404) throw new Error(`This token can't see ${S.cfg.owner}/${S.cfg.dataRepo}. When creating the token, under Repository access choose Only select repositories and tick ${S.cfg.dataRepo}; set Contents to Read-only.`);
+      if (!rr.ok) throw new Error("GitHub error " + rr.status + " while checking the repo.");
+      S.log.push("Repo reachable: " + S.cfg.owner + "/" + S.cfg.dataRepo);
       try { S.cfg = { ...M.DEFAULT_CONFIG, ...JSON.parse(await gh("config.json", true)) }; }
       catch (e) { if (e.code === 401 || e.code === 403) throw e; }
       const dbP = loadDB();
@@ -53,8 +59,12 @@
       if (csvs.length) { name = csvs[csvs.length - 1].name; text = await gh("collection/" + name, true); }
       await dbP;
       if (text) { S.rows = M.parseCollection(text); S.csvName = name; }
+      S.log.push(`Decks found: ${S.decks.length}` + (deckFiles.length ? "" : " (no .json files in decks/)"));
+      S.log.push(text ? `Collection: ${name} (${S.rows.length} rows)` : "Collection: no .csv found in collection/");
+      S.log.push(`Card DB: ${S.dbCount} cards`);
+      if (S.decks.length && S.tab === "data") S.tab = "decks";
     } catch (e) { S.error = e.message; }
-    S.busy = ""; recompute(); status(); render();
+    S.busy = ""; try { recompute(); } catch (e) { S.error = "Loaded, but processing failed: " + e.message; } status(); render();
   }
 
   function recompute() {
@@ -234,6 +244,7 @@
     let h = `<h2>Access</h2><div class="card"><div class="muted">A read-only fine-grained GitHub token (Contents: read, only <b>${esc(S.cfg.dataRepo)}</b>). Stored in this browser only.</div>
       <input type="password" id="tok" placeholder="github_pat_…" autocomplete="off" value="${esc(S.token)}">
       <button class="btn" data-act="savetok">Save &amp; load</button>${S.token ? `<button class="btn alt" data-act="forget">Forget token</button>` : ""}</div>`;
+    if (S.log.length) h += `<div class="card muted">${S.log.map(esc).join("<br>")}</div>`;
     h += `<h2>Load local files</h2><div class="card"><div class="muted">Try things without the token: pick a ManaBox CSV and/or deck JSON files. Nothing leaves your device.</div>
       <input type="file" id="local" multiple accept=".csv,.json"></div>`;
     h += `<h2>Collection</h2>`;
