@@ -304,7 +304,7 @@
   }
   function cardRow(key, name, qty, cls, open, extra, deck) {
     const info = M.cardInfo(S.idx, key);
-    return `<div class="cardrow ${cls || ""}" data-act="toggle"><div class="t"><span class="n">${artImg(key, name, deck, "art_crop", "thumb")}${qty > 1 ? qty + "× " : ""}${esc(name)}</span><span>${extra || ""}</span></div><div ${open ? "" : "hidden"} data-o>${artImg(key, name, deck, "art_crop", "bigart")}${oracleBox(info, key)}</div></div>`;
+    return `<div class="cardrow ${cls || ""}" data-act="toggle" data-peek="${esc(key)}"><div class="t"><span class="n">${artImg(key, name, deck, "art_crop", "thumb")}${qty > 1 ? qty + "× " : ""}${esc(name)}</span><span>${extra || ""}</span></div><div ${open ? "" : "hidden"} data-o>${artImg(key, name, deck, "art_crop", "bigart")}${oracleBox(info, key)}</div></div>`;
   }
   function ownPill(key, showFree) {
     if (!S.rows.length) return "";
@@ -406,7 +406,7 @@
       h += `<div class="trow" data-act="statsrole" data-r="${k}"><div class="row"><span>${ROLE_LABEL[k]}</span><span><b>${have}</b> <span class="muted">/ ${k === "plan" ? "~" : ""}${want}</span> ${k === "plan" ? "" : `<span class="pill ${cls}">${diff >= 0 ? "+" + diff : diff}</span>`}</span></div><div class="bar"><i class="${cls}" style="width:${pct}%"></i></div></div>`;
       if (open) {
         const list = st.roles[ROLE_STAT[k]].map((x) => ({ ...x, name: (M.cardInfo(S.idx, x.key) || { name: x.key }).name })).sort((a, b) => a.name.localeCompare(b.name));
-        h += `<div class="chips">${list.map((x) => `<button data-act="zoom" data-key="${esc(x.key)}" data-slug="${esc(d.slug)}">${x.qty > 1 ? x.qty + "× " : ""}${esc(plain(x.name))}</button>`).join("") || `<span class="muted">None.</span>`}</div>`;
+        h += `<div class="chips">${list.map((x) => `<button data-act="zoom" data-peek="${esc(x.key)}" data-key="${esc(x.key)}" data-slug="${esc(d.slug)}">${x.qty > 1 ? x.qty + "× " : ""}${esc(plain(x.name))}</button>`).join("") || `<span class="muted">None.</span>`}</div>`;
       }
     }
     h += `<div class="muted">${st.multiRole} cards fill more than one role.</div>`;
@@ -514,10 +514,10 @@
       let h = "";
       if (p && p.note) {
         const hits = [...m.values()].filter((e) => !cmdKeys.has(e.key) && norm(p.note).includes(norm(e.name)));
-        if (hits.length) h += `<div class="muted">Mentioned in the note:</div><div class="chips">${hits.map((e) => `<button class="on" data-act="choose" data-key="${esc(e.key)}">${esc(e.name)}</button>`).join("")}</div>`;
+        if (hits.length) h += `<div class="muted">Mentioned in the note:</div><div class="chips">${hits.map((e) => `<button class="on" data-act="choose" data-peek="${esc(e.key)}" data-key="${esc(e.key)}">${esc(e.name)}</button>`).join("")}</div>`;
       }
       const items = sortCards(d, [...m.values()].filter((e) => !cmdKeys.has(e.key) && (!q || norm(e.name).includes(q))));
-      return h + (items.length ? items.map((e) => { const info = M.cardInfo(S.idx, e.key); return `<div class="cardrow" data-act="choose" data-key="${esc(e.key)}"><div class="t"><span class="n">${artImg(e.key, e.name, d, "art_crop", "thumb")}${esc(e.name)}</span><span class="muted">${esc(groupOf(info))}</span></div></div>`; }).join("") : `<div class="muted">No cards match.</div>`);
+      return h + (items.length ? items.map((e) => { const info = M.cardInfo(S.idx, e.key); return `<div class="cardrow" data-act="choose" data-peek="${esc(e.key)}" data-key="${esc(e.key)}"><div class="t"><span class="n">${artImg(e.key, e.name, d, "art_crop", "thumb")}${esc(e.name)}</span><span class="muted">${esc(groupOf(info))}</span></div></div>`; }).join("") : `<div class="muted">No cards match.</div>`);
     }
     if (q.length < 2) return `<div class="muted">Type at least 2 letters of the card name.</div>`;
     let ci = null;
@@ -530,7 +530,7 @@
       out.push(inf);
       if (out.length >= 40) break;
     }
-    return out.length ? out.map((inf) => `<div class="cardrow" data-act="choose" data-key="${esc(inf.key)}"><div class="t"><span class="n">${esc(plain(inf.name))}</span><span class="muted">${esc(inf.cost)}</span></div><div class="muted">${esc(inf.type)}${S.own.get(inf.key) ? " · you own it" : ""}</div></div>`).join("") : `<div class="muted">Nothing in this deck's colours matches.</div>`;
+    return out.length ? out.map((inf) => `<div class="cardrow" data-act="choose" data-peek="${esc(inf.key)}" data-key="${esc(inf.key)}"><div class="t"><span class="n">${esc(plain(inf.name))}</span><span class="muted">${esc(inf.cost)}</span></div><div class="muted">${esc(inf.type)}${S.own.get(inf.key) ? " · you own it" : ""}</div></div>`).join("") : `<div class="muted">Nothing in this deck's colours matches.</div>`;
   }
   function chooserModal() {
     if (!S.ch) return "";
@@ -539,7 +539,7 @@
     const title = c.mode === "in" ? "Which card comes IN?" : c.pendIn ? `Which card goes OUT for ${plain(c.pendIn)}?` : "Which card goes OUT?";
     return `<div class="modal" data-act="closech"><div class="mbox wide" data-act="noop"><div class="row"><b>${esc(title)}</b><button class="btn alt" data-act="closech">Close</button></div>
       <input type="text" id="chq" placeholder="${c.mode === "in" ? "Search card names…" : "Filter this deck…"}" autocomplete="off" value="${esc(c.q || "")}" style="margin:8px 0">
-      <div id="chres">${chooserResults()}</div>${c.pendIn ? `<button class="btn alt" data-act="choosenone">Decide the cut later</button>` : ""}</div></div>`;
+      <div class="muted">Hover a card to preview it. On a phone, press and hold.</div><div id="chres">${chooserResults()}</div>${c.pendIn ? `<button class="btn alt" data-act="choosenone">Decide the cut later</button>` : ""}</div></div>`;
   }
   function zoomModal() {
     if (!S.zoom) return "";
@@ -650,6 +650,7 @@
   function emptyMsg(t) { return `<div class="card muted">${esc(t)}</div>`; }
 
   function render() {
+    if (typeof peekHide === "function") peekHide();
     document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === S.tab));
     let h = "";
     if (S.error) h += `<div class="card lvl-error">${esc(S.error)}</div>`;
@@ -662,12 +663,60 @@
   }
 
   /* ---------- events ---------- */
+  /* ---------- card preview: mouse hover, or press-and-hold on touch ---------- */
+  const peek = document.createElement("img");
+  peek.id = "peek"; peek.alt = "";
+  document.body.appendChild(peek);
+  let holdTimer = 0, holdShown = false, startXY = null;
+  S.noClickUntil = 0;
+  function peekShow(key) {
+    const d = S.ch ? deckBySlug(S.ch.slug) : S.deck ? deckBySlug(S.deck) : null;
+    const nm = (M.cardInfo(S.idx, key) || { name: key.replace(/^\?/, "") }).name;
+    const sid = M.pickSid(S.own, S.idx, key, d);
+    delete peek.dataset.fb;
+    if (sid) peek.dataset.fb = M.artByName(nm, "normal");
+    peek.style.visibility = "visible";
+    peek.src = sid ? M.artUrl(sid, "normal") : M.artByName(nm, "normal");
+    peek.style.display = "block";
+  }
+  const peekHide = () => { peek.style.display = "none"; };
+  const canHover = window.matchMedia && window.matchMedia("(hover:hover)").matches;
+  document.addEventListener("mouseover", (ev) => {
+    if (!canHover) return;
+    const t = ev.target.closest && ev.target.closest("[data-peek]");
+    if (t) { peek.className = ""; peekShow(t.dataset.peek); } else peekHide();
+  });
+  document.addEventListener("mousemove", (ev) => {
+    if (peek.style.display !== "block" || peek.className) return;
+    const w = 300, h = 420;
+    let x = ev.clientX + 22, y = ev.clientY - h / 3;
+    if (x + w > window.innerWidth - 8) x = ev.clientX - w - 22;
+    y = Math.max(8, Math.min(window.innerHeight - h - 8, y));
+    peek.style.left = Math.max(8, x) + "px"; peek.style.top = y + "px";
+  });
+  document.addEventListener("touchstart", (ev) => {
+    const t = ev.target.closest && ev.target.closest("[data-peek]");
+    if (!t) return;
+    const p = ev.touches[0]; startXY = [p.clientX, p.clientY]; holdShown = false;
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => { holdShown = true; peek.className = "touch"; peek.style.left = ""; peek.style.top = ""; peekShow(t.dataset.peek); }, 350);
+  }, { passive: true });
+  document.addEventListener("touchmove", (ev) => {
+    if (!startXY || holdShown) return;
+    const p = ev.touches[0];
+    if (Math.abs(p.clientX - startXY[0]) > 10 || Math.abs(p.clientY - startXY[1]) > 10) clearTimeout(holdTimer);
+  }, { passive: true });
+  const touchEnd = () => { clearTimeout(holdTimer); if (holdShown) { S.noClickUntil = Date.now() + 600; peekHide(); holdShown = false; } };
+  document.addEventListener("touchend", touchEnd);
+  document.addEventListener("touchcancel", touchEnd);
+  document.addEventListener("contextmenu", (ev) => { if (ev.target.closest && ev.target.closest("[data-peek]") && !canHover) ev.preventDefault(); });
   document.addEventListener("error", (ev) => {
     const i = ev.target;
     if (!i || i.tagName !== "IMG") return;
     if (i.dataset.fb) { i.src = i.dataset.fb; delete i.dataset.fb; } else i.style.visibility = "hidden";
   }, true);
   document.addEventListener("click", async (ev) => {
+    if (Date.now() < S.noClickUntil) { ev.preventDefault(); ev.stopPropagation(); return; }
     const tabBtn = ev.target.closest("#tabs button");
     if (tabBtn) { S.tab = tabBtn.dataset.tab; S.out = null; S.zoom = null; S.ch = null; if (S.tab !== "decks") S.deck = null; render(); window.scrollTo(0, 0); return; }
     const el = ev.target.closest("[data-act]");
@@ -741,7 +790,7 @@
     else if (a === "forget") { S.token = ""; try { localStorage.removeItem("mtg_token"); } catch (e) { /* ignore */ } S.decks = []; S.rows = []; S.csvName = ""; recompute(); status(); render(); }
   });
   document.addEventListener("input", (ev) => {
-    if (ev.target.id === "chq" && S.ch) { S.ch.q = ev.target.value; $("#chres").innerHTML = chooserResults(); }
+    if (ev.target.id === "chq" && S.ch) { S.ch.q = ev.target.value; peekHide(); $("#chres").innerHTML = chooserResults(); }
   });
   document.addEventListener("change", async (ev) => {
     if (ev.target.id === "rbmode") { S.rbmode = ev.target.value; render(); }
