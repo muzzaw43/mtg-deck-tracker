@@ -108,3 +108,6 @@ div.scimg{display:flex;align-items:center;justify-content:center;text-align:cent
 #peek.touch{left:50%;top:8vh;transform:translateX(-50%);width:min(78vw,340px)}
 [data-peek]{-webkit-touch-callout:none}
 @media (hover:none){[data-peek]{-webkit-user-select:none;user-select:none}}
+
+/* stop the phone's "save image" menu: touches land on the card, not the picture */
+[data-peek] img,.ac img,.sc img,.tile img,.hero img,.mbox img,#peek{pointer-events:none;-webkit-touch-callout:none;-webkit-user-drag:none;user-select:none}

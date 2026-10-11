@@ -12,6 +12,28 @@
   };
   try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; S.dview = localStorage.getItem("mtg_dview") || "stacks"; } catch (e) { /* storage blocked */ }
 
+  /* ---------- phone back button: closes pop-ups, then leaves the deck ---------- */
+  S.nav = []; S.ignorePop = 0;
+  function pushNav(t) { try { history.pushState({ t }, ""); S.nav.push(t); } catch (e) { /* ignore */ } }
+  function popNav(t) {
+    if (S.nav[S.nav.length - 1] !== t) return;
+    S.nav.pop(); S.ignorePop++;
+    try { history.back(); } catch (e) { S.ignorePop--; }
+  }
+  function resetNav() {
+    const n = S.nav.length; if (!n) return;
+    S.nav = []; S.ignorePop++;
+    try { history.go(-n); } catch (e) { S.ignorePop--; }
+  }
+  const openModalNav = () => { if (!S.zoom && !S.ch) pushNav("modal"); };
+  window.addEventListener("popstate", () => {
+    if (S.ignorePop > 0) { S.ignorePop--; return; }
+    const t = S.nav.pop();
+    if (t === "modal") { S.zoom = null; S.ch = null; }
+    else if (t === "deck") S.deck = null;
+    render();
+  });
+
   /* ---------- GitHub ---------- */
   async function gh(path, raw) {
     const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/${path}?ref=${encodeURIComponent(S.cfg.branch)}`;
@@ -117,7 +139,7 @@
       if (!pr.ok) throw new Error("Upload failed: GitHub " + pr.status);
       S.rows = rows; S.csvName = "ManaBox_Collection.csv";
       S.log.push(`Uploaded ${file.name}: ${rows.length} rows (was ${oldN})`);
-      S.saving = ""; recompute(); S.tab = "data"; S.deck = null;
+      S.saving = ""; recompute(); S.tab = "data"; S.deck = null; resetNav();
     } catch (e) { S.error = e.message; S.saving = ""; }
     status(); render();
   }
@@ -182,7 +204,7 @@
   async function addSwap(slug, pre) {
     const d = deckBySlug(slug);
     if (!d || !S.wtoken) return;
-    if (!pre) { S.ch = { mode: "in", slug, i: null, q: "", focus: true }; render(); return; }
+    if (!pre) { openModalNav(); S.ch = { mode: "in", slug, i: null, q: "", focus: true }; render(); return; }
     const inn = pre.in;
     const ki = M.resolve(S.idx, inn);
     if (!ki) { S.error = `"${inn}" is not in the card DB — check the spelling (nothing saved).`; render(); return; }
@@ -695,6 +717,7 @@
     peek.style.left = Math.max(8, x) + "px"; peek.style.top = y + "px";
   });
   document.addEventListener("touchstart", (ev) => {
+    S.lastTouch = Date.now();
     const t = ev.target.closest && ev.target.closest("[data-peek]");
     if (!t) return;
     const p = ev.touches[0]; startXY = [p.clientX, p.clientY]; holdShown = false;
@@ -709,7 +732,7 @@
   const touchEnd = () => { clearTimeout(holdTimer); if (holdShown) { S.noClickUntil = Date.now() + 600; peekHide(); holdShown = false; } };
   document.addEventListener("touchend", touchEnd);
   document.addEventListener("touchcancel", touchEnd);
-  document.addEventListener("contextmenu", (ev) => { if (ev.target.closest && ev.target.closest("[data-peek]") && !canHover) ev.preventDefault(); });
+  document.addEventListener("contextmenu", (ev) => { if (ev.target.closest && ev.target.closest("[data-peek],.ac,.sc,.mbox,.hero,.tile") && (!canHover || Date.now() - (S.lastTouch || 0) < 1500)) ev.preventDefault(); });
   document.addEventListener("error", (ev) => {
     const i = ev.target;
     if (!i || i.tagName !== "IMG") return;
@@ -718,13 +741,13 @@
   document.addEventListener("click", async (ev) => {
     if (Date.now() < S.noClickUntil) { ev.preventDefault(); ev.stopPropagation(); return; }
     const tabBtn = ev.target.closest("#tabs button");
-    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.out = null; S.zoom = null; S.ch = null; if (S.tab !== "decks") S.deck = null; render(); window.scrollTo(0, 0); return; }
+    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
     const el = ev.target.closest("[data-act]");
     if (!el) return;
     const a = el.dataset.act;
     if (a === "toggle") { const o = el.querySelector("[data-o]"); if (o) o.hidden = !o.hidden; }
-    else if (a === "open") { S.deck = el.dataset.slug; render(); window.scrollTo(0, 0); }
-    else if (a === "back") { S.deck = null; render(); }
+    else if (a === "open") { S.deck = el.dataset.slug; pushNav("deck"); render(); window.scrollTo(0, 0); }
+    else if (a === "back") { S.deck = null; popNav("deck"); render(); }
     else if (a === "level") { S.level = el.dataset.l; render(); }
     else if (a === "closeout") { S.out = null; render(); }
     else if (a === "copy") { const ok = await copyText(S.out.text); el.textContent = ok ? "Copied ✓" : "Select the text and copy it manually"; }
@@ -762,8 +785,8 @@
       render();
     }
     else if (a === "dview") { S.dview = el.dataset.v; try { localStorage.setItem("mtg_dview", S.dview); } catch (e) { /* ignore */ } render(); }
-    else if (a === "zoom") { S.zoom = { key: el.dataset.key, slug: el.dataset.slug }; render(); }
-    else if (a === "closezoom") { S.zoom = null; render(); }
+    else if (a === "zoom") { openModalNav(); S.zoom = { key: el.dataset.key, slug: el.dataset.slug }; render(); }
+    else if (a === "closezoom") { S.zoom = null; popNav("modal"); render(); }
     else if (a === "noop") { /* keep modal open */ }
     else if (a === "addswap") addSwap(el.dataset.slug);
     else if (a === "rebuildcsv" || a === "rebuildtext") {
@@ -773,18 +796,18 @@
     }
     else if (a === "swap") {
       const sw = el.dataset.sw;
-      if (sw === "change" || sw === "changeout") { S.ch = { mode: sw === "change" ? "in" : "out", slug: el.dataset.slug, i: +el.dataset.i, q: "", focus: sw === "change" }; render(); }
+      if (sw === "change" || sw === "changeout") { openModalNav(); S.ch = { mode: sw === "change" ? "in" : "out", slug: el.dataset.slug, i: +el.dataset.i, q: "", focus: sw === "change" }; render(); }
       else swapAction(el.dataset.slug, +el.dataset.i, sw);
     }
     else if (a === "choose") {
       const c = S.ch, key = el.dataset.key; if (!c) return;
       if (c.i == null && c.mode === "in") { S.ch = { mode: "out", slug: c.slug, i: null, q: "", pendIn: key }; render(); return; }
-      S.ch = null; render();
+      S.ch = null; popNav("modal"); render();
       if (c.i == null) addSwap(c.slug, { in: c.pendIn, out: key });
       else swapAction(c.slug, c.i, c.mode === "in" ? "change" : "changeout", key);
     }
-    else if (a === "choosenone") { const c = S.ch; S.ch = null; render(); if (c && c.pendIn) addSwap(c.slug, { in: c.pendIn, out: "" }); }
-    else if (a === "closech") { S.ch = null; render(); }
+    else if (a === "choosenone") { const c = S.ch; S.ch = null; popNav("modal"); render(); if (c && c.pendIn) addSwap(c.slug, { in: c.pendIn, out: "" }); }
+    else if (a === "closech") { S.ch = null; popNav("modal"); render(); }
     else if (a === "savewtok") { S.wtoken = $("#wtok").value.trim(); S.who = $("#who").value.trim(); try { localStorage.setItem("mtg_wtoken", S.wtoken); localStorage.setItem("mtg_who", S.who); } catch (e) { /* ignore */ } render(); }
     else if (a === "forgetw") { S.wtoken = ""; try { localStorage.removeItem("mtg_wtoken"); } catch (e) { /* ignore */ } render(); }
     else if (a === "forget") { S.token = ""; try { localStorage.removeItem("mtg_token"); } catch (e) { /* ignore */ } S.decks = []; S.rows = []; S.csvName = ""; recompute(); status(); render(); }
