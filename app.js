@@ -313,7 +313,7 @@
 
   function rebuildList(d) {
     const mode = S.rbmode || "swaps";
-    const list = mode === "swaps" ? M.applySwaps(d, S.idx) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
+    const list = mode === "swaps" ? M.applySwaps(d, S.idx, { only: ["approved", "made"] }) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
     return list.map((c) => ({ key: c.key || M.keyOf(S.idx, c.name), name: c.name, qty: c.qty }));
   }
   function rebuildSection(d) {
@@ -321,7 +321,7 @@
     const mode = S.rbmode || "swaps", list = rebuildList(d), al = M.allocateDeck(d, list, S.own, S.cfg);
     const got = al.lines.reduce((s, l) => s + l.qty, 0), want = list.reduce((s, c) => s + c.qty, 0);
     let h = `<h3>Rebuild from collection</h3><div class="card"><div class="muted">Builds a ManaBox import for this deck from copies you own: ones already in this deck, then free binders. Choose a printing where you own more than one.</div>
-      <select id="rbmode"><option value="swaps"${mode === "swaps" ? " selected" : ""}>List with all pencilled swaps applied</option><option value="physical"${mode === "physical" ? " selected" : ""}>List as it is physically (made swaps applied)</option><option value="current"${mode === "current" ? " selected" : ""}>List as ManaBox shows it now</option></select>
+      <select id="rbmode"><option value="swaps"${mode === "swaps" ? " selected" : ""}>List with confirmed changes (approved + made)</option><option value="physical"${mode === "physical" ? " selected" : ""}>List as it is physically (made swaps applied)</option><option value="current"${mode === "current" ? " selected" : ""}>List as ManaBox shows it now</option></select>
       <div style="margin-top:6px"><span class="pill ${got === want ? "ok" : "warn"}">${got} of ${want} cards found</span></div>`;
     if (al.short.length) h += al.short.map((x) => `<div class="muted">✗ ${esc(x.name)}${x.need > 1 ? " ×" + x.need : ""} — ${esc(x.why)}</div>`).join("");
     const cf = M.pickConflicts(S.decks, d, al, S.own, S.cfg);
@@ -349,7 +349,8 @@
       <div class="muted">${esc(M.commandersOf(d).join(" + "))} · ${esc(d.status || "planned")} · ${M.deckTotal(m)} cards${d.updated ? " · updated " + esc(d.updated) : ""}</div>
       <div><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
       ${pens.some((p) => M.pencilStatus(p) === "made") ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="physical">Export list as it is physically</button>` : ""}
-      ${pens.length ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with all swaps applied</button>` : ""}</div>`;
+      ${pens.some((p) => ["approved", "made"].includes(M.pencilStatus(p))) ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with confirmed changes</button>` : ""}</div>
+      ${pens.some((p) => M.pencilStatus(p) === "pencilled") ? `<div class="muted">Pencilled swaps aren't in any export until you approve them.</div>` : ""}`;
     const is = issuesFor(d.slug);
     if (is.length) h += `<h3>Checks</h3>` + is.map(issueHtml).join("");
     const btn = (i, act, txt, alt) => `<button class="btn${alt ? " alt" : ""}" data-act="swap" data-slug="${esc(d.slug)}" data-i="${i}" data-sw="${act}">${txt}</button>`;
@@ -513,8 +514,8 @@
     else if (a === "exportdeck") {
       const d = deckBySlug(el.dataset.slug);
       const mode = el.dataset.mode;
-      const list = mode === "swaps" ? M.applySwaps(d, S.idx) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
-      const label = { swaps: " — with all swaps applied", physical: " — as it is physically", current: " — list in ManaBox" }[mode];
+      const list = mode === "swaps" ? M.applySwaps(d, S.idx, { only: ["approved", "made"] }) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
+      const label = { swaps: " — with confirmed changes (approved + made)", physical: " — as it is physically", current: " — list in ManaBox" }[mode];
       showOut((d.name || d.slug) + label, M.deckText(list), d.slug + (mode === "current" ? "" : "_" + mode) + ".txt");
     }
     else if (a === "tradecsv" || a === "tradetext") {
