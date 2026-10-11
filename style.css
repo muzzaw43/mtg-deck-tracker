@@ -65,3 +65,10 @@ select{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);bac
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:10;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:16px 12px 80px}
 .mbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;max-width:380px;width:100%}
 .zimg{display:block;width:100%;border-radius:12px}
+/* hover to enlarge (mouse only) */
+@media (hover:hover){
+  .ac{transition:transform .12s}
+  .ac:hover{overflow:visible;z-index:6}
+  .ac:hover .acimg{transform:scale(1.35);transform-origin:top center;border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.65);position:relative}
+  .gridv .ac:hover .acimg,.ac.full:hover .acimg{transform:scale(1.3);transform-origin:center}
+}
