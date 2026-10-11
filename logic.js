@@ -364,36 +364,29 @@
   const rowAUD = (r) => { const v = parseFloat(r.price); return isFinite(v) && v >= 0 && (!r.cur || /^AUD$/i.test(r.cur)) && String(r.price).trim() !== "" ? v : null; };
   function buildTrades(ctx, reserve) {
     const { own, claims, cfg, idx } = ctx;
-    const free = new Set(cfg.freeBinders.map(norm)), multi = new Set(cfg.multiCopyBinders.map(norm));
+    const free = new Set(cfg.freeBinders.map(norm));
     const res = [];
     for (const o of own.values()) {
       if (isBasic(o.name)) continue;
       const hard = sumQty(claims.hard.get(o.key)), soft = sumQty(claims.soft.get(o.key));
       const rar = o.rows.reduce((b, r) => (RARS.indexOf((r.rarity || "").toLowerCase()) > RARS.indexOf(b) ? (r.rarity || "").toLowerCase() : b), "common");
       const keep = typeof reserve === "object" && reserve ? (reserve[rar] || 0) : (reserve || 0);
-      const t = Math.max(0, Math.min(o.free, o.total - hard - soft) - keep);
+      const freeQty = o.rows.reduce((s, r) => s + (free.has(norm(r.binder)) ? r.qty : 0), 0);
+      const t = Math.max(0, Math.min(freeQty, o.total - hard - soft) - keep);
       if (t <= 0) continue;
       // allocate across the rows that sit in free binders
       let left = t;
       const alloc = [];
-      const perBinderUsed = new Map();
       for (const r of o.rows) {
         if (left <= 0) break;
-        const nb = norm(r.binder);
-        let avail = 0;
-        if (free.has(nb)) avail = r.qty;
-        else if (multi.has(nb)) {
-          const binderQty = o.binders.get(r.binder), used = perBinderUsed.get(nb) || 0;
-          avail = Math.max(0, Math.min(r.qty, binderQty - 1 - used));
-          perBinderUsed.set(nb, used + avail);
-        }
-        const take = Math.min(avail, left);
+        if (!free.has(norm(r.binder))) continue;
+        const take = Math.min(r.qty, left);
         if (take > 0) { alloc.push({ ...r, qty: take }); left -= take; }
       }
       let val = 0, priced = 0;
       for (const r of alloc) { const p = rowAUD(r); if (p != null) { val += p * r.qty; priced += r.qty; } }
       const committed = Math.min(o.total, hard + soft);
-      res.push({ key: o.key, name: o.name, total: o.total, free: o.free, hard, soft, tradeable: t, alloc, info: cardInfo(idx, o.key), rarity: rar, keep,
+      res.push({ key: o.key, name: o.name, total: o.total, free: freeQty, hard, soft, tradeable: t, alloc, info: cardInfo(idx, o.key), rarity: rar, keep,
         committed, uncommitted: Math.max(0, o.total - committed), unit: priced ? val / priced : null, value: priced ? val : null });
     }
     res.sort((a, b) => a.name.localeCompare(b.name));

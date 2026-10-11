@@ -711,12 +711,11 @@
   function keepReason(x) {
     const o = S.own.get(x.key);
     if (!o || x.total <= x.tradeable) return "";
-    const fr = new Set(S.cfg.freeBinders.map(norm)), mu = new Set(S.cfg.multiCopyBinders.map(norm)), parts = [];
+    const fr = new Set(S.cfg.freeBinders.map(norm)), parts = [];
     for (const [b, q] of o.binders) {
       const nb = norm(b);
       if (fr.has(nb)) continue;
-      if (mu.has(nb)) parts.push(q >= 2 ? `1 stays in ${b} (only extras are spare)` : `${q} stays in ${b} (single copy)`);
-      else parts.push(`${q} locked in ${b}`);
+      parts.push(`${q} locked in ${b}`);
     }
     if (x.soft) parts.push(`${x.soft} wanted by a planned or pencilled deck`);
     if (x.keep) parts.push(`${x.keep} kept back (${x.rarity} spares setting)`);
@@ -726,7 +725,7 @@
     if (!S.rows.length) return emptyMsg("Load a collection CSV first.");
     const t = M.buildTrades({ own: S.own, claims: S.claims, cfg: S.cfg, idx: S.idx }, S.reserveBy).filter((x) => !(S.minPrice > 0) || (x.unit != null && x.unit >= S.minPrice));
     if (!S.picked) S.picked = new Set(t.map((x) => x.key));
-    let h = `<h2>Trade candidates</h2><div class="muted">Spare copies in your free binders that no deck (built, planned or pencilled in) needs. Basics are skipped. In "The Hobbit" and "Avatar" the first copy of a card stays put, so only extras count. Cards you own more of than the Spare number show why underneath.</div>
+    let h = `<h2>Trade candidates</h2><div class="muted">Spare copies in your free binders that no deck (built, planned or pencilled in) needs. Basics are skipped. Cards you own more of than the Spare number show why underneath.</div>
       <div class="card"><div class="muted">Spares to keep back of each card, by rarity</div><div class="row">${M.RARS.map((r) => `<label class="muted">${r}<br><input type="number" min="0" value="${S.reserveBy[r]}" data-rs="${r}" style="width:64px"></label>`).join("")}</div>
       <div class="row" style="margin-top:8px"><label class="muted">Only show cards worth at least (AUD)<br><input type="number" min="0" step="0.5" value="${S.minPrice || ""}" id="minprice" placeholder="0" style="width:90px"></label>
         <label class="muted">Flag cards worth at least (AUD)<br><input type="number" min="0" step="0.5" value="${S.flagPrice || ""}" id="flagprice" placeholder="off" style="width:90px"></label></div>
@@ -736,7 +735,7 @@
     h += `<div><button class="btn" data-act="tradecsv">Export ManaBox CSV</button><button class="btn alt" data-act="tradetext">Export text list</button><button class="btn alt" data-act="tradeall">${S.picked.size === t.length ? "Untick all" : "Tick all"}</button></div>
       <div class="muted" style="margin:6px 0">${t.length} cards · ${t.reduce((s, x) => s + x.tradeable, 0)} spare copies · about $${t.reduce((s, x) => s + (x.value || 0), 0).toFixed(2)} AUD in total. Ticked: ${t.filter((x) => S.picked.has(x.key)).length} cards, about $${t.filter((x) => S.picked.has(x.key)).reduce((s, x) => s + (x.value || 0), 0).toFixed(2)} AUD.</div>
       <table><tr><th></th><th>Card</th><th>Spare</th><th>Own</th>${S.showCommitted ? "<th>In decks</th>" : ""}<th>Price</th></tr>` +
-      t.map((x) => `<tr class="${S.flagPrice > 0 && x.unit != null && x.unit >= S.flagPrice ? "flag" : ""}"><td><input type="checkbox" data-act="pick" data-key="${esc(x.key)}" ${S.picked.has(x.key) ? "checked" : ""}></td><td>${x.alloc[0] && x.alloc[0].sid ? `<img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(x.alloc[0].sid))}">` : ""}${esc(x.name)}${keepReason(x) ? `<div class="muted">${esc(keepReason(x))}</div>` : ""}</td><td>${x.tradeable}</td><td class="muted">${S.showCommitted ? x.uncommitted : x.total}</td>${S.showCommitted ? `<td class="muted">${x.committed}</td>` : ""}<td>${x.unit != null ? (S.flagPrice > 0 && x.unit >= S.flagPrice ? "★ " : "") + "$" + x.unit.toFixed(2) + (x.tradeable > 1 ? `<div class="muted">$${x.value.toFixed(2)} total</div>` : "") : `<span class="muted">—</span>`}</td></tr>`).join("") + `</table>`;
+      t.map((x) => `<tr class="${S.flagPrice > 0 && x.unit != null && x.unit >= S.flagPrice ? "flag" : ""}"><td><input type="checkbox" data-act="pick" data-key="${esc(x.key)}" ${S.picked.has(x.key) ? "checked" : ""}></td><td>${x.alloc[0] && x.alloc[0].sid ? `<img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(x.alloc[0].sid))}">` : ""}${esc(x.name)}${keepReason(x) ? `<div class="muted">${esc(keepReason(x))}</div>` : ""}</td><td>${x.tradeable}</td><td class="muted">${S.showCommitted ? x.uncommitted : x.total}</td>${S.showCommitted ? `<td class="muted">${x.committed}</td>` : ""}<td>${x.unit != null ? (S.flagPrice > 0 && x.unit >= S.flagPrice ? "★ " : "") + "$" + x.unit.toFixed(2) : `<span class="muted">—</span>`}</td></tr>`).join("") + `</table>`;
     S._trades = t;
     return h;
   }
