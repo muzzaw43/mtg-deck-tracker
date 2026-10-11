@@ -147,9 +147,22 @@
   }
   const deckTotal = (m) => [...m.values()].reduce((s, e) => s + e.qty, 0);
 
-  function applySwaps(deck, idx) {
+  const pencilStatus = (p) => norm(p.status || "pencilled");
+  // "made" = physically swapped but ManaBox not updated yet. If the CSV deck list already shows it, it is "reflected".
+  function isReflected(deck, p, idx, m) {
+    m = m || deckMap(deck, idx);
+    const outGone = !p.out || !m.has(keyOf(idx, p.out));
+    const inThere = !p.in || m.has(keyOf(idx, p.in));
+    return pencilStatus(p) === "made" && outGone && inThere;
+  }
+  // opts.only: array of statuses to apply (default: every active swap)
+  function applySwaps(deck, idx, opts) {
+    const only = opts && opts.only;
+    const base = deckMap(deck, idx);
     const m = deckMap(deck, idx);
     for (const p of activePencils(deck)) {
+      if (only && !only.includes(pencilStatus(p))) continue;
+      if (isReflected(deck, p, idx, base)) continue;
       if (p.out) {
         const k = keyOf(idx, p.out), e = m.get(k);
         if (e) { e.qty -= 1; if (e.qty <= 0) m.delete(k); }
@@ -173,12 +186,16 @@
     for (const d of decks) {
       const st = norm(d.status || "planned");
       if (st === "retired") continue;
-      const m = deckMap(d, idx);
-      for (const [k, e] of m) add(st === "built" ? hard : soft, k, d, e.qty);
-      for (const p of activePencils(d)) {
-        if (!p.in) continue;
-        const k = keyOf(idx, p.in);
-        if (!m.has(k)) add(soft, k, d, 1);
+      if (st === "built") {
+        // what is physically in the deck: CSV list plus swaps already made by hand
+        for (const e of applySwaps(d, idx, { only: ["made"] })) add(hard, e.key, d, e.qty);
+        for (const p of activePencils(d)) {
+          if (pencilStatus(p) === "made" || !p.in) continue;
+          const k = keyOf(idx, p.in);
+          add(soft, k, d, 1);
+        }
+      } else {
+        for (const e of applySwaps(d, idx)) add(soft, e.key, d, e.qty);
       }
     }
     return { hard, soft };
@@ -223,21 +240,31 @@
       }
 
       for (const p of activePencils(d)) {
+        const pst = pencilStatus(p);
         const label = `${p.out || "—"} → ${p.in || "—"}`;
-        if (p.out && !m.has(keyOf(idx, p.out))) add("warn", d, p.out, `Pencilled OUT isn't in the list (already swapped?) [${label}]`);
-        if (p.in) {
-          const k = keyOf(idx, p.in), info = cardInfo(idx, k);
-          if (!info) add("error", d, p.in, `Pencilled IN not found in the card DB [${label}]`);
-          else {
-            if (m.has(k) && !isBasic(info.name)) add("warn", d, info.name, `Pencilled IN is already in the list [${label}]`);
-            if (cmdCI && info.ci.some((c) => !cmdCI.includes(c)))
-              add("error", d, info.name, `Pencilled IN is outside the commander's colour identity [${label}]`);
-            if (haveCollection && !isBasic(info.name)) {
-              const o = own.get(k);
-              if (!o) add("info", d, info.name, `Pencilled IN isn't owned — on the wishlist? [${label}]`);
-              else if (o.free - sumQty(claims.soft.get(k)) < 0 || o.free === 0)
-                add("warn", d, info.name, `Owned but no free copy right now [${label}]`);
-            }
+        const ko = p.out ? keyOf(idx, p.out) : null, ki = p.in ? keyOf(idx, p.in) : null;
+        const inInfo = ki ? cardInfo(idx, ki) : null;
+        if (p.in && !inInfo) { add("error", d, p.in, `IN card not found in the card DB [${label}]`); continue; }
+        if (inInfo && cmdCI && inInfo.ci.some((c) => !cmdCI.includes(c)))
+          add("error", d, inInfo.name, `IN card is outside the commander's colour identity [${label}]`);
+        if (pst === "made") {
+          if (isReflected(d, p, idx, m)) {
+            add("info", d, p.in || p.out, `ManaBox already shows this swap — mark it done [${label}]`);
+          } else {
+            add("todo", d, p.in || p.out, "Made by hand — update ManaBox: " + [p.out ? "remove " + p.out : "", p.in ? "add " + p.in : ""].filter(Boolean).join(", "));
+            if (haveCollection && inInfo && !isBasic(inInfo.name) && !own.get(ki))
+              add("todo", d, inInfo.name, "Not in the collection CSV — scan it into ManaBox");
+          }
+          continue;
+        }
+        if (p.out && !m.has(ko)) add("warn", d, p.out, `Pencilled OUT isn't in the list (already swapped?) [${label}]`);
+        if (inInfo) {
+          if (m.has(ki) && !isBasic(inInfo.name)) add("warn", d, inInfo.name, `Pencilled IN is already in the list [${label}]`);
+          if (haveCollection && !isBasic(inInfo.name)) {
+            const o = own.get(ki);
+            if (!o) add("info", d, inInfo.name, `Pencilled IN isn't owned yet [${label}]`);
+            else if (o.free - sumQty(claims.soft.get(ki)) < 0 || o.free === 0)
+              add("warn", d, inInfo.name, `Owned but no free copy right now [${label}]`);
           }
         }
       }
@@ -263,9 +290,32 @@
               `Built decks use ${need} copies (${list.map((y) => y.deckName || y.deck).join(", ")}) but the CSV has ${have}`);
       }
     }
-    const order = { error: 0, warn: 1, info: 2 };
+    const order = { error: 0, todo: 1, warn: 2, info: 3 };
     out.sort((a, b) => order[a.level] - order[b.level] || a.deckName.localeCompare(b.deckName));
     return out;
+  }
+
+  /* ---------- Wishlist ---------- */
+  // wishlist entry: { name, decks: [slug…], note, kind: "want" | "maybe" | "future" }
+  // status: missing | partial | have (owned, swap pending) | placed (owned and in every wanting deck) | unused (owned, no pending use)
+  function evalWishlist(wl, decks, idx, own, claims) {
+    return (wl || []).map((w) => {
+      const key = keyOf(idx, w.name), info = cardInfo(idx, key), o = own && own.get(key);
+      const owned = o ? o.total : 0, free = o ? o.free : 0;
+      const wanting = w.decks || [];
+      const dk = wanting.map((sl) => decks.find((d) => d.slug === sl)).filter(Boolean);
+      const need = Math.max(1, wanting.length);
+      const placedCount = dk.filter((d) => applySwaps(d, idx, { only: ["made"] }).some((e) => e.key === key)).length;
+      const madeIn = decks.some((d) => activePencils(d).some((p) => pencilStatus(p) === "made" && p.in && keyOf(idx, p.in) === key));
+      const pending = decks.some((d) => activePencils(d).some((p) => pencilStatus(p) !== "made" && p.in && keyOf(idx, p.in) === key));
+      let status;
+      if (!owned) status = "missing";
+      else if (owned < need) status = "partial";
+      else if (wanting.length && placedCount === wanting.length && dk.length === wanting.length) status = "placed";
+      else if (pending || madeIn) status = "have";
+      else status = "unused";
+      return { ...w, key, info, owned, free, need, placedCount, madeIn, pending, status };
+    });
   }
 
   /* ---------- Trades ---------- */
@@ -341,6 +391,7 @@
     artUrl, artByName, pickSid,
     DEFAULT_CONFIG, norm, isBasic, parseCSV, parseCollection, csvEscape,
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
+    pencilStatus, isReflected, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
     buildClaims, sumQty, runChecks, buildTrades, tradesCSV, tradesText,
   };

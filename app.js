@@ -8,7 +8,7 @@
   const S = {
     tab: "decks", deck: null, token: "", cfg: { ...M.DEFAULT_CONFIG },
     idx: null, rows: [], csvName: "", own: new Map(), decks: [], claims: { hard: new Map(), soft: new Map() },
-    log: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
+    log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
   };
   try { S.token = localStorage.getItem("mtg_token") || ""; } catch (e) { /* storage blocked */ }
 
@@ -54,6 +54,7 @@
         d.slug = f.name.replace(/\.json$/i, "");
         return d;
       }));
+      try { S.wl = JSON.parse(await gh("wishlist.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.wl = []; }
       const csvs = (await ghList("collection")).filter((f) => f.type === "file" && /\.csv$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name));
       let text = "", name = "";
       if (csvs.length) { name = csvs[csvs.length - 1].name; text = await gh("collection/" + name, true); }
@@ -68,10 +69,11 @@
   }
 
   function recompute() {
-    if (!S.idx) { S.own = new Map(); S.checks = []; return; }
+    if (!S.idx) { S.own = new Map(); S.checks = []; S.wlEval = []; return; }
     S.own = M.buildOwnership(S.rows, S.idx, S.cfg);
     S.claims = M.buildClaims(S.decks, S.idx);
     S.checks = M.runChecks({ decks: S.decks, idx: S.idx, own: S.own, claims: S.claims, cfg: S.cfg });
+    S.wlEval = M.evalWishlist(S.wl, S.decks, S.idx, S.own, S.claims);
     S.picked = null;
   }
 
@@ -144,10 +146,13 @@
     return S.decks.map((d) => {
       const m = M.deckMap(d, S.idx), tot = M.deckTotal(m), is = issuesFor(d.slug);
       const er = is.filter((i) => i.level === "error").length, wa = is.filter((i) => i.level === "warn").length;
-      const pc = M.activePencils(d).length;
+      const act = M.activePencils(d), mm = new Map();
+      const todo = act.filter((p) => M.pencilStatus(p) === "made" && !M.isReflected(d, p, S.idx)).length;
+      const pc = act.filter((p) => M.pencilStatus(p) !== "made").length;
+      const wn = S.wlEval.filter((w) => (w.decks || []).includes(d.slug) && ["missing", "partial"].includes(w.status)).length;
       return `<div class="card click" data-act="open" data-slug="${esc(d.slug)}"><div class="row"><b>${esc(d.name || d.slug)}</b><span class="pill">${esc(d.status || "planned")}</span></div>
         <div class="muted">${esc(M.commandersOf(d).join(" + "))} · ${tot} cards</div>
-        <div>${pc ? `<span class="pill pencil">${pc} pencilled</span> ` : ""}${er ? `<span class="pill err">${er} errors</span> ` : ""}${wa ? `<span class="pill warn">${wa} warnings</span> ` : ""}${(d.wishlist || []).length ? `<span class="pill">${d.wishlist.length} wishlist</span>` : ""}</div></div>`;
+        <div>${todo ? `<span class="pill todo">${todo} to do in ManaBox</span> ` : ""}${pc ? `<span class="pill pencil">${pc} pencilled</span> ` : ""}${er ? `<span class="pill err">${er} errors</span> ` : ""}${wa ? `<span class="pill warn">${wa} warnings</span> ` : ""}${wn ? `<span class="pill">${wn} on wishlist</span>` : ""}</div></div>`;
     }).join("");
   }
 
@@ -158,20 +163,23 @@
     let h = `<button class="back" data-act="back">← All decks</button><h2>${esc(d.name || d.slug)}</h2>
       <div class="muted">${esc(M.commandersOf(d).join(" + "))} · ${esc(d.status || "planned")} · ${M.deckTotal(m)} cards${d.updated ? " · updated " + esc(d.updated) : ""}</div>
       <div><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
-      ${pens.length ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with swaps applied</button>` : ""}</div>`;
+      ${pens.some((p) => M.pencilStatus(p) === "made") ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="physical">Export list as it is physically</button>` : ""}
+      ${pens.length ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with all swaps applied</button>` : ""}</div>`;
     const is = issuesFor(d.slug);
     if (is.length) h += `<h3>Checks</h3>` + is.map(issueHtml).join("");
-    if (pens.length) {
-      h += `<h3>Pencilled swaps</h3>`;
-      for (const p of pens) {
-        h += `<div class="card"><span class="pill pencil">${esc(p.status || "pencilled")}</span> ${p.note ? `<span class="muted">${esc(p.note)}</span>` : ""}`;
-        if (p.out) h += `<div class="muted">OUT</div>` + cardRow(M.keyOf(S.idx, p.out), p.out, 1, "out", true, "", d);
-        if (p.in) { const k = M.keyOf(S.idx, p.in); h += `<div class="muted">IN</div>` + cardRow(k, p.in, 1, "in", true, ownPill(k, true), d); }
-        h += `</div>`;
-      }
-    }
+    const swapBlock = (list, cls) => list.map((p) => {
+      let x = `<div class="card"><span class="pill ${cls}">${esc(p.status || "pencilled")}</span> ${p.note ? `<span class="muted">${esc(p.note)}</span>` : ""}`;
+      if (p.out) x += `<div class="muted">OUT</div>` + cardRow(M.keyOf(S.idx, p.out), p.out, 1, "out", true, "", d);
+      if (p.in) { const k = M.keyOf(S.idx, p.in); x += `<div class="muted">IN</div>` + cardRow(k, p.in, 1, "in", true, ownPill(k, true), d); }
+      return x + `</div>`;
+    }).join("");
+    const mades = pens.filter((p) => M.pencilStatus(p) === "made"), pencils = pens.filter((p) => M.pencilStatus(p) !== "made");
+    if (mades.length) h += `<h3>Made by hand — update ManaBox (${mades.length})</h3>` + swapBlock(mades, "todo");
+    if (pencils.length) h += `<h3>Pencilled swaps (${pencils.length})</h3>` + swapBlock(pencils, "pencil");
+    const wls = S.wlEval.filter((w) => (w.decks || []).includes(d.slug));
+    if (wls.length) h += `<h3>Wishlist</h3>` + wls.map((w) => cardRow(w.key, w.name, 1, "", false, wishPill(w), d) + (w.note ? `<div class="muted">${esc(w.note)}</div>` : "")).join("");
     if ((d.wishlist || []).length) {
-      h += `<h3>Wishlist</h3>` + d.wishlist.map((w) => { const k = M.keyOf(S.idx, w.name); return cardRow(k, w.name, 1, "", false, ownPill(k, true), d) + (w.note ? `<div class="muted">${esc(w.note)}</div>` : ""); }).join("");
+      h += `<h3>Wishlist (deck file)</h3>` + d.wishlist.map((w) => { const k = M.keyOf(S.idx, w.name); return cardRow(k, w.name, 1, "", false, ownPill(k, true), d) + (w.note ? `<div class="muted">${esc(w.note)}</div>` : ""); }).join("");
     }
     if ((d.extras || []).length) {
       h += `<h3>Display / extra cards (not in the 100)</h3>` + d.extras.map((x) => { const k = M.keyOf(S.idx, x.name); return cardRow(k, x.name, 1, "", false, `<span class="pill">${esc(x.note || "extra")}</span>`, d); }).join("");
@@ -192,12 +200,12 @@
   }
   function vCheck() {
     if (!S.decks.length) return emptyMsg("Load decks first.");
-    const counts = { error: 0, warn: 0, info: 0 };
+    const counts = { error: 0, todo: 0, warn: 0, info: 0 };
     S.checks.forEach((c) => counts[c.level]++);
     const chip = (l, t) => `<button class="${S.level === l ? "on" : ""}" data-act="level" data-l="${l}">${t}</button>`;
     const list = S.checks.filter((c) => S.level === "all" || c.level === S.level);
     let h = `<h2>Discrepancy check</h2><div class="muted">Re-run on every load. Looks at deck size, singleton, colour identity, DB matches, collection vs deck claims, pencilled swaps and wishlist.${S.csvName ? ` Collection CSV dated ${esc(csvDate() || S.csvName)}.` : " No collection CSV loaded, so ownership checks are skipped."}</div>
-      <div class="chips">${chip("all", "All " + S.checks.length)}${chip("error", "Errors " + counts.error)}${chip("warn", "Warnings " + counts.warn)}${chip("info", "Info " + counts.info)}</div>`;
+      <div class="chips">${chip("all", "All " + S.checks.length)}${chip("error", "Errors " + counts.error)}${chip("todo", "ManaBox to-do " + counts.todo)}${chip("warn", "Warnings " + counts.warn)}${chip("info", "Info " + counts.info)}</div>`;
     h += list.length ? list.map(issueHtml).join("") : `<div class="card">Nothing to report.</div>`;
     return h;
   }
@@ -216,28 +224,29 @@
     return h;
   }
 
+  const WSTAT = { missing: ["err", "need to find"], partial: ["warn", "need more copies"], have: ["ok", "have it — swap pending"], placed: ["ok", "in the deck"], unused: ["warn", "in collection, no pending use"] };
+  function wishPill(w) {
+    const [c, t] = WSTAT[w.status] || ["", w.status];
+    let extra = w.status === "partial" ? ` (own ${w.owned} of ${w.need})` : w.status === "missing" && w.need > 1 ? ` (need ${w.need})` : "";
+    if (w.status === "missing" && w.madeIn) return `<span class="pill todo">in deck by hand — scan it in</span>`;
+    return `<span class="pill ${c}">${esc(t + extra)}</span>`;
+  }
   function vWishlist() {
-    if (!S.decks.length) return emptyMsg("Load decks first.");
-    const need = new Map();
-    let h = `<h2>Wishlist</h2><div class="muted">Per-deck wishlist cards plus pencilled IN cards you don't own a free copy of.</div>`;
-    for (const d of S.decks) {
-      const items = (d.wishlist || []).map((w) => ({ name: w.name, note: w.note, src: "wishlist" }));
-      for (const p of M.activePencils(d)) {
-        if (!p.in) continue;
-        const k = M.keyOf(S.idx, p.in), o = S.own.get(k);
-        if (S.rows.length && (!o || o.free - M.sumQty(S.claims.soft.get(k)) < 0 || o.free === 0)) items.push({ name: p.in, note: "pencilled swap", src: "pencilled" });
-      }
-      if (!items.length) continue;
-      h += `<h3>${esc(d.name || d.slug)}</h3>`;
-      for (const it of items) {
-        const k = M.keyOf(S.idx, it.name), o = S.own.get(k);
-        h += cardRow(k, it.name, 1, "", false, `<span class="pill ${it.src === "pencilled" ? "pencil" : ""}">${esc(it.note || it.src)}</span> ${ownPill(k, true)}`, d);
-        if (!o || !o.free) need.set(k, (M.cardInfo(S.idx, k) || { name: it.name }).name);
-      }
-    }
-    if (need.size) h += `<h3>Still to find</h3><button class="btn" data-act="wishtext">Export as text list</button>`;
-    S._need = [...need.values()].sort();
-    return need.size || h.includes("cardrow") ? h : emptyMsg("No wishlist cards yet.");
+    if (!S.wl.length && !S.decks.some((d) => (d.wishlist || []).length)) return emptyMsg("No wishlist loaded.");
+    const sec = (title, list, open) => list.length ? `<h3>${title} (${list.length})</h3>` + list.map((w) => cardRow(w.key, w.name, 1, "", open, wishPill(w) + (w.kind && w.kind !== "want" ? ` <span class="pill">${esc(w.kind)}</span>` : ""), null)
+      + `<div class="muted">${esc((w.decks || []).map((sl) => (deckBySlug(sl) || { name: sl }).name || sl).join(", "))}${w.note ? " — " + esc(w.note) : ""}</div>`).join("") : "";
+    const ev = S.wlEval;
+    const find = ev.filter((w) => ["missing", "partial"].includes(w.status) && !w.madeIn);
+    const scan = ev.filter((w) => w.status === "missing" && w.madeIn);
+    const have = ev.filter((w) => w.status === "have");
+    const unused = ev.filter((w) => w.status === "unused");
+    const placed = ev.filter((w) => w.status === "placed");
+    let h = `<h2>Wishlist</h2><div class="muted">Cards clear themselves once your collection has enough copies for every deck that wants them. ${S.csvName ? "Based on " + esc(S.csvName) + "." : "Load a collection CSV to clear cards."}</div>`;
+    h += sec("Still to find", find) + sec("In a deck by hand, not in ManaBox", scan) + sec("Have it — swap pending", have) + sec("In collection, no pending use — still wanted?", unused);
+    if (placed.length) h += `<h3>Cleared: in the deck (${placed.length})</h3><div class="muted">${placed.map((w) => esc(w.name)).join(", ")}</div>`;
+    S._need = find.map((w) => w.info ? w.info.name : w.name).sort();
+    if (S._need.length) h += `<div style="margin-top:10px"><button class="btn" data-act="wishtext">Export "still to find" as text</button></div>`;
+    return h;
   }
 
   function vData() {
@@ -293,8 +302,10 @@
     else if (a === "download") download(S.out.filename, S.out.text);
     else if (a === "exportdeck") {
       const d = deckBySlug(el.dataset.slug);
-      const list = el.dataset.mode === "swaps" ? M.applySwaps(d, S.idx) : [...M.deckMap(d, S.idx).values()];
-      showOut((d.name || d.slug) + (el.dataset.mode === "swaps" ? " — with swaps applied" : " — current list"), M.deckText(list), d.slug + (el.dataset.mode === "swaps" ? "_swaps" : "") + ".txt");
+      const mode = el.dataset.mode;
+      const list = mode === "swaps" ? M.applySwaps(d, S.idx) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
+      const label = { swaps: " — with all swaps applied", physical: " — as it is physically", current: " — list in ManaBox" }[mode];
+      showOut((d.name || d.slug) + label, M.deckText(list), d.slug + (mode === "current" ? "" : "_" + mode) + ".txt");
     }
     else if (a === "tradecsv" || a === "tradetext") {
       const sel = (S._trades || []).filter((t) => S.picked.has(t.key));
