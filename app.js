@@ -247,6 +247,12 @@
   const csvDate = () => { const m = /(\d{8})/.exec(S.csvName); return m ? `${m[1].slice(6)}/${m[1].slice(4, 6)}/${m[1].slice(0, 4)}` : ""; };
   const issuesFor = (slug) => S.checks.filter((c) => c.deck === slug);
   const TYPE_ORDER = ["Commander", "Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land", "Other"];
+  // Orders cards the way the deck screen groups them (commander, creatures, … lands), A–Z within each; no headings.
+  function sortCards(d, items) {
+    const cmd = new Set(M.commandersOf(d).map((n) => M.keyOf(S.idx, n)));
+    const rank = (x) => { const k = x.key || M.keyOf(S.idx, x.name); return cmd.has(k) ? 0 : TYPE_ORDER.indexOf(groupOf(M.cardInfo(S.idx, k))); };
+    return items.map((x) => ({ x, r: rank(x) })).sort((a, b) => a.r - b.r || a.x.name.localeCompare(b.x.name)).map((o) => o.x);
+  }
   function groupOf(info) {
     if (!info) return "Other";
     const t = info.frontType;
@@ -516,7 +522,7 @@
       const mode = el.dataset.mode;
       const list = mode === "swaps" ? M.applySwaps(d, S.idx, { only: ["approved", "made"] }) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
       const label = { swaps: " — with confirmed changes (approved + made)", physical: " — as it is physically", current: " — list in ManaBox" }[mode];
-      showOut((d.name || d.slug) + label, M.deckText(list), d.slug + (mode === "current" ? "" : "_" + mode) + ".txt");
+      showOut((d.name || d.slug) + label, M.deckText(sortCards(d, list)), d.slug + (mode === "current" ? "" : "_" + mode) + ".txt");
     }
     else if (a === "tradecsv" || a === "tradetext") {
       const sel = (S._trades || []).filter((t) => S.picked.has(t.key));
@@ -531,8 +537,8 @@
     else if (a === "bulkdone") bulkDone();
     else if (a === "rebuildcsv" || a === "rebuildtext") {
       const d = deckBySlug(el.dataset.slug), al = M.allocateDeck(d, rebuildList(d), S.own, S.cfg);
-      if (a === "rebuildcsv") showOut((d.name || d.slug) + " — rebuild from collection (ManaBox CSV)", M.rebuildCSV(d, al.lines), d.slug + "_rebuild.csv");
-      else showOut((d.name || d.slug) + " — rebuild from collection (text)", M.rebuildText(al.lines), d.slug + "_rebuild.txt");
+      if (a === "rebuildcsv") showOut((d.name || d.slug) + " — rebuild from collection (ManaBox CSV)", M.rebuildCSV(d, sortCards(d, al.lines)), d.slug + "_rebuild.csv");
+      else showOut((d.name || d.slug) + " — rebuild from collection (text)", M.rebuildText(sortCards(d, al.lines)), d.slug + "_rebuild.txt");
     }
     else if (a === "swap") swapAction(el.dataset.slug, +el.dataset.i, el.dataset.sw);
     else if (a === "savewtok") { S.wtoken = $("#wtok").value.trim(); S.who = $("#who").value.trim(); try { localStorage.setItem("mtg_wtoken", S.wtoken); localStorage.setItem("mtg_who", S.who); } catch (e) { /* ignore */ } render(); }
