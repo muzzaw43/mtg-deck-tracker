@@ -177,14 +177,16 @@
     if (rc.looks.length) h += `<div><span class="pill pencil">${rc.looks.length} pencilled but ManaBox already shows them</span></div>${list(rc.looks)}`;
     return h + `</div>`;
   }
-  async function addSwap(slug) {
+  // "Sol Ring // Sol Ring" (same name both sides in the DB) -> "Sol Ring"
+  const plain = (k) => { const p = String(k).split(" // "); return p.length === 2 && norm(p[0]) === norm(p[1]) ? p[0] : k; };
+  async function addSwap(slug, pre) {
     const d = deckBySlug(slug);
     if (!d || !S.wtoken) return;
-    const inn = (prompt("Card coming IN (exact name):", "") || "").trim();
-    if (!inn) return;
+    if (!pre) { S.ch = { mode: "in", slug, i: null, q: "", focus: true }; render(); return; }
+    const inn = pre.in;
     const ki = M.resolve(S.idx, inn);
     if (!ki) { S.error = `"${inn}" is not in the card DB — check the spelling (nothing saved).`; render(); return; }
-    const out = (prompt("Card going OUT (exact name from this deck; leave blank if undecided):", "") || "").trim();
+    const out = pre.out || "";
     let ko = "";
     if (out) {
       ko = M.resolve(S.idx, out) || "";
@@ -192,13 +194,13 @@
     }
     if (!confirm(`Add a pencilled swap to ${d.name}?\n\nIN: ${ki}\nOUT: ${ko || "undecided"}`)) return;
     d.pencilled = d.pencilled || [];
-    d.pencilled.push({ out: ko, in: ki, status: "pencilled", note: "", log: [{ at: new Date().toISOString().slice(0, 10), by: S.who || "me", act: "Added" }] });
+    d.pencilled.push({ out: plain(ko), in: plain(ki), status: "pencilled", note: "", log: [{ at: new Date().toISOString().slice(0, 10), by: S.who || "me", act: "Added" }] });
     S.error = ""; S.saving = "Saving…"; render();
     try { await saveDeck(d, `Swap (${d.name || d.slug}): Added ${ki}${ko ? " for " + ko : ""}${S.who ? " [" + S.who + "]" : ""}`); S.saving = ""; recompute(); }
     catch (e) { d.pencilled.pop(); S.error = e.message; S.saving = ""; }
     status(); render();
   }
-  async function swapAction(slug, i, act) {
+  async function swapAction(slug, i, act, arg) {
     const d = deckBySlug(slug), p = d && (d.pencilled || [])[i];
     if (!p) return;
     const before = JSON.stringify(p), at = new Date().toISOString().slice(0, 10), by = S.who || "me";
@@ -217,22 +219,22 @@
       p.log = p.log.filter((_, n) => n !== k);
       msg = "Undid: " + e.act;
     } else if (act === "changeout") {
-      const nm = (prompt("Which card goes OUT? (exact name from this deck)", "") || "").trim();
+      const nm = (arg || prompt("Which card goes OUT? (exact name from this deck)", "") || "").trim();
       if (!nm) return;
       const k = M.resolve(S.idx, nm);
       if (!k || !M.deckMap(d, S.idx).has(k)) { S.error = `"${nm}" isn't in this deck's list (nothing saved).`; render(); return; }
       if (!confirm(`Set the OUT card?\n\nWas: ${p.out || "undecided"}\nNow: ${k}`)) return;
       entry = { at, by, act: "Set OUT to " + k, prev: status0, fromOut: p.out || "", noteBefore: p.note || "" };
-      p.out = k; msg = entry.act;
+      p.out = plain(k); msg = entry.act;
     } else if (act === "change") {
-      const nm = (prompt("Which card went IN instead? (exact name; blank to keep " + (p.in || "none") + ")", "") || "").trim();
+      const nm = (arg || prompt("Which card went IN instead? (exact name; blank to keep " + (p.in || "none") + ")", "") || "").trim();
       if (!nm) return;
       const k = M.resolve(S.idx, nm);
       if (!k) { S.error = `"${nm}" is not in the card DB — check the spelling (nothing saved).`; render(); return; }
       if (!confirm(`Change the IN card?\n\nWas: ${p.in || "—"}\nNow: ${k}`)) return;
       entry = { at, by, act: "Changed IN to " + k, prev: status0, fromIn: p.in || "", noteBefore: p.note || "" };
       p.note = ((p.note ? p.note + " · " : "") + "was " + (p.in || "—")).trim();
-      p.in = k; msg = entry.act;
+      p.in = plain(k); msg = entry.act;
     } else {
       let q = SW_TEXT[act];
       if (!q) return;
@@ -400,7 +402,7 @@
       const i = (d.pencilled || []).indexOf(p), st = M.pencilStatus(p);
       const und = lastUndo(p) >= 0 ? btn(i, "undo", "Undo last change", 1) : "";
       const btns = !S.wtoken ? "" : st === "made" ? btn(i, "done", "Mark done") + btn(i, "change", "Different card", 1) + btn(i, "cancel", "Cancel", 1) + und
-        : (st === "approved" ? "" : btn(i, "approve", "Approve")) + btn(i, "made", "I made it") + btn(i, "change", "Different card", 1) + (p.out ? "" : btn(i, "changeout", "Choose cut", 1)) + btn(i, "cancel", "Cancel", 1) + und;
+        : (st === "approved" ? "" : btn(i, "approve", "Approve")) + btn(i, "made", "I made it") + btn(i, "change", "Different IN card", 1) + btn(i, "changeout", p.out ? "Change cut" : "Choose cut", 1) + btn(i, "cancel", "Cancel", 1) + und;
       let x = `<div class="card"><span class="pill ${cls}">${esc(p.status || "pencilled")}</span> ${p.note ? `<span class="muted">${esc(p.note)}</span>` : ""}`;
       const side = (nm, role) => {
         if (!nm) return `<div class="sc empty"><div class="scimg">${role === "out" ? "Cut not chosen yet" : "No card"}</div><div class="scl">${role.toUpperCase()}</div></div>`;
@@ -460,6 +462,41 @@
       cards += `</div>`;
     }
     return pre + cards + h;
+  }
+  function chooserResults() {
+    const c = S.ch, d = deckBySlug(c.slug), q = norm(c.q || ""), m = M.deckMap(d, S.idx);
+    const cmdKeys = new Set(M.commandersOf(d).map((n) => M.keyOf(S.idx, n)));
+    if (c.mode === "out") {
+      const p = c.i != null ? d.pencilled[c.i] : null;
+      let h = "";
+      if (p && p.note) {
+        const hits = [...m.values()].filter((e) => !cmdKeys.has(e.key) && norm(p.note).includes(norm(e.name)));
+        if (hits.length) h += `<div class="muted">Mentioned in the note:</div><div class="chips">${hits.map((e) => `<button class="on" data-act="choose" data-key="${esc(e.key)}">${esc(e.name)}</button>`).join("")}</div>`;
+      }
+      const items = sortCards(d, [...m.values()].filter((e) => !cmdKeys.has(e.key) && (!q || norm(e.name).includes(q))));
+      return h + (items.length ? items.map((e) => { const info = M.cardInfo(S.idx, e.key); return `<div class="cardrow" data-act="choose" data-key="${esc(e.key)}"><div class="t"><span class="n">${artImg(e.key, e.name, d, "art_crop", "thumb")}${esc(e.name)}</span><span class="muted">${esc(groupOf(info))}</span></div></div>`; }).join("") : `<div class="muted">No cards match.</div>`);
+    }
+    if (q.length < 2) return `<div class="muted">Type at least 2 letters of the card name.</div>`;
+    let ci = null;
+    for (const n of M.commandersOf(d)) { const inf = M.cardInfo(S.idx, M.keyOf(S.idx, n)); if (inf) ci = (ci || []).concat(inf.ci); }
+    const out = [];
+    for (const k of Object.keys(S.idx.db)) {
+      if (!norm(k).includes(q) || m.has(k)) continue;
+      const inf = M.cardInfo(S.idx, k);
+      if (!inf || (ci && inf.ci.some((x) => !ci.includes(x)))) continue;
+      out.push(inf);
+      if (out.length >= 40) break;
+    }
+    return out.length ? out.map((inf) => `<div class="cardrow" data-act="choose" data-key="${esc(inf.key)}"><div class="t"><span class="n">${esc(plain(inf.name))}</span><span class="muted">${esc(inf.cost)}</span></div><div class="muted">${esc(inf.type)}${S.own.get(inf.key) ? " · you own it" : ""}</div></div>`).join("") : `<div class="muted">Nothing in this deck's colours matches.</div>`;
+  }
+  function chooserModal() {
+    if (!S.ch) return "";
+    const c = S.ch, d = deckBySlug(c.slug);
+    if (!d) return "";
+    const title = c.mode === "in" ? "Which card comes IN?" : c.pendIn ? `Which card goes OUT for ${plain(c.pendIn)}?` : "Which card goes OUT?";
+    return `<div class="modal" data-act="closech"><div class="mbox wide" data-act="noop"><div class="row"><b>${esc(title)}</b><button class="btn alt" data-act="closech">Close</button></div>
+      <input type="text" id="chq" placeholder="${c.mode === "in" ? "Search card names…" : "Filter this deck…"}" autocomplete="off" value="${esc(c.q || "")}" style="margin:8px 0">
+      <div id="chres">${chooserResults()}</div>${c.pendIn ? `<button class="btn alt" data-act="choosenone">Decide the cut later</button>` : ""}</div></div>`;
   }
   function zoomModal() {
     if (!S.zoom) return "";
@@ -575,8 +612,9 @@
     if (S.busy || S.saving) h += `<div class="card muted">${esc(S.busy || S.saving)}</div>`;
     h += outBox();
     h += { decks: vDecks, check: vCheck, trades: vTrades, wishlist: vWishlist, data: vData }[S.tab]();
-    h += zoomModal();
+    h += zoomModal() + chooserModal();
     $("#view").innerHTML = h;
+    if (S.ch && S.ch.focus) { const q = $("#chq"); if (q) q.focus(); S.ch.focus = false; }
   }
 
   /* ---------- events ---------- */
@@ -587,7 +625,7 @@
   }, true);
   document.addEventListener("click", async (ev) => {
     const tabBtn = ev.target.closest("#tabs button");
-    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.out = null; S.zoom = null; if (S.tab !== "decks") S.deck = null; render(); window.scrollTo(0, 0); return; }
+    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.out = null; S.zoom = null; S.ch = null; if (S.tab !== "decks") S.deck = null; render(); window.scrollTo(0, 0); return; }
     const el = ev.target.closest("[data-act]");
     if (!el) return;
     const a = el.dataset.act;
@@ -626,10 +664,26 @@
       if (a === "rebuildcsv") showOut((d.name || d.slug) + " — rebuild from collection (ManaBox CSV)", M.rebuildCSV(d, sortCards(d, al.lines)), d.slug + "_rebuild.csv");
       else showOut((d.name || d.slug) + " — rebuild from collection (text)", M.rebuildText(sortCards(d, al.lines)), d.slug + "_rebuild.txt");
     }
-    else if (a === "swap") swapAction(el.dataset.slug, +el.dataset.i, el.dataset.sw);
+    else if (a === "swap") {
+      const sw = el.dataset.sw;
+      if (sw === "change" || sw === "changeout") { S.ch = { mode: sw === "change" ? "in" : "out", slug: el.dataset.slug, i: +el.dataset.i, q: "", focus: sw === "change" }; render(); }
+      else swapAction(el.dataset.slug, +el.dataset.i, sw);
+    }
+    else if (a === "choose") {
+      const c = S.ch, key = el.dataset.key; if (!c) return;
+      if (c.i == null && c.mode === "in") { S.ch = { mode: "out", slug: c.slug, i: null, q: "", pendIn: key }; render(); return; }
+      S.ch = null; render();
+      if (c.i == null) addSwap(c.slug, { in: c.pendIn, out: key });
+      else swapAction(c.slug, c.i, c.mode === "in" ? "change" : "changeout", key);
+    }
+    else if (a === "choosenone") { const c = S.ch; S.ch = null; render(); if (c && c.pendIn) addSwap(c.slug, { in: c.pendIn, out: "" }); }
+    else if (a === "closech") { S.ch = null; render(); }
     else if (a === "savewtok") { S.wtoken = $("#wtok").value.trim(); S.who = $("#who").value.trim(); try { localStorage.setItem("mtg_wtoken", S.wtoken); localStorage.setItem("mtg_who", S.who); } catch (e) { /* ignore */ } render(); }
     else if (a === "forgetw") { S.wtoken = ""; try { localStorage.removeItem("mtg_wtoken"); } catch (e) { /* ignore */ } render(); }
     else if (a === "forget") { S.token = ""; try { localStorage.removeItem("mtg_token"); } catch (e) { /* ignore */ } S.decks = []; S.rows = []; S.csvName = ""; recompute(); status(); render(); }
+  });
+  document.addEventListener("input", (ev) => {
+    if (ev.target.id === "chq" && S.ch) { S.ch.q = ev.target.value; $("#chres").innerHTML = chooserResults(); }
   });
   document.addEventListener("change", async (ev) => {
     if (ev.target.id === "rbmode") { S.rbmode = ev.target.value; render(); }

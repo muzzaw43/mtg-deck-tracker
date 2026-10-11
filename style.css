@@ -86,3 +86,5 @@ div.scimg{display:flex;align-items:center;justify-content:center;text-align:cent
 .tagl{font-size:10px;font-weight:700;border-radius:4px;padding:1px 5px;color:#fff}
 .tagl.out{background:var(--pencil)}.tagl.in{background:var(--ok)}
 @media (hover:hover){.sc:hover .scimg{transform:scale(1.04);transition:transform .12s}}
+.mbox.wide{max-width:520px}
+.mbox .cardrow{cursor:pointer}
