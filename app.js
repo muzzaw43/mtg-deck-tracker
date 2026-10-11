@@ -651,12 +651,114 @@
     if (fl.length > shown.length) h += `<button class="btn" data-act="colmore">Show ${Math.min(120, fl.length - shown.length)} more</button>`;
     return h;
   }
+
+  /* ---------- Set checklists: what you have vs what's missing (set contents come from Scryfall) ---------- */
+  S.sv = { code: "", mode: "cards", show: "all", rar: new Set(), q: "", layout: "grid", limit: 200, loading: "", err: "", find: "" };
+  S.setList = null; S.setCache = {};
+  const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage full or blocked */ } };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function scry(url) { const r = await fetch(url); if (!r.ok) throw new Error("Scryfall said " + r.status); return r.json(); }
+  async function loadSetList() {
+    if (S.setList || S._listBusy) return;
+    S._listBusy = true;
+    const c = lsGet("mtg_setlist");
+    if (c && c.at && Date.now() - c.at < 7 * 864e5) { S.setList = c.list; S._listBusy = false; return; }
+    S.sv.loading = "Loading the list of sets…"; render();
+    try {
+      const d = await scry("https://api.scryfall.com/sets");
+      S.setList = d.data.map((s) => ({ code: s.code, name: s.name, date: s.released_at || "", type: s.set_type, n: s.printed_size || s.card_count || 0 }));
+      lsSet("mtg_setlist", { at: Date.now(), list: S.setList });
+    } catch (e) { S.sv.err = "Couldn't load the set list (" + e.message + "). It needs an internet connection."; }
+    S.sv.loading = ""; S._listBusy = false; render();
+  }
+  async function loadSetCards(code, mode) {
+    const ck = "mtg_set_" + code + "_" + mode;
+    if (S.setCache[ck]) return;
+    const c = lsGet(ck);
+    if (c && c.at && Date.now() - c.at < 3 * 864e5) { S.setCache[ck] = c.cards; return; }
+    S.sv.loading = "Loading " + code.toUpperCase() + "…"; S.sv.err = ""; render();
+    try {
+      const q = encodeURIComponent("e:" + code), extra = mode === "prints" ? "&unique=prints&include_extras=true&include_variants=true" : "&unique=cards";
+      let url = `https://api.scryfall.com/cards/search?order=set&q=${q}${extra}`, out = [];
+      while (url) {
+        const d = await scry(url);
+        for (const c2 of d.data) out.push({ n: c2.name, cn: String(c2.collector_number), r: c2.rarity, id: c2.id });
+        url = d.has_more ? d.next_page : "";
+        if (url) { S.sv.loading = `Loading ${code.toUpperCase()}… ${out.length} of ${d.total_cards}`; render(); await sleep(110); }
+      }
+      S.setCache[ck] = out; lsSet(ck, { at: Date.now(), cards: out });
+    } catch (e) { S.sv.err = "Couldn't load that set (" + e.message + "). It needs an internet connection."; }
+    S.sv.loading = ""; render();
+  }
+  function setOwned(code) {
+    const mine = colEntries().filter((e) => e.set.toLowerCase() === code), names = new Map(), prints = new Map();
+    for (const e of mine) { names.set(e.key, (names.get(e.key) || 0) + e.qty); const k = e.cn.toLowerCase(); prints.set(k, (prints.get(k) || 0) + e.qty); }
+    return { names, prints, n: mine.length };
+  }
+  function setChecklist(code, mode) {
+    const cards = S.setCache["mtg_set_" + code + "_" + mode]; if (!cards) return null;
+    const own = setOwned(code);
+    return cards.map((c) => { const key = M.keyOf(S.idx, c.n), qty = mode === "prints" ? (own.prints.get(c.cn.toLowerCase()) || 0) : (own.names.get(key) || 0); return { ...c, key, qty }; });
+  }
+  function vSets() {
+    const v = S.sv;
+    let h = "";
+    if (v.err) h += `<div class="card lvl-error">${esc(v.err)}</div>`;
+    if (v.loading) h += `<div class="card muted">${esc(v.loading)}</div>`;
+    if (!v.code) {
+      const mine = new Map();
+      for (const e of colEntries()) { const c = e.set.toLowerCase(); const m = mine.get(c) || { code: c, name: e.setName, names: new Set(), qty: 0 }; m.names.add(e.key); m.qty += e.qty; mine.set(c, m); }
+      const q = v.find.toLowerCase();
+      h += `<div class="muted">Pick a set to see every card in it, what you have, and what's missing. The list of cards in a set comes from Scryfall, so it needs an internet connection the first time (then it's remembered).</div>
+        <input type="text" id="setfind" placeholder="Find any set by name or code…" value="${esc(v.find)}" autocomplete="off" style="width:100%;margin:8px 0">`;
+      let list = [...mine.values()].filter((m) => !q || m.name.toLowerCase().includes(q) || m.code.includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+      const rowHtml = (code, name, sub) => `<div class="cardrow" data-act="setopen" data-code="${esc(code)}"><div class="t"><span class="n">${esc(name)} <span class="muted">(${esc(code.toUpperCase())})</span></span><span class="muted">${esc(sub)}</span></div></div>`;
+      h += `<h3>Sets you own cards from (${list.length})</h3><div id="setmine">` + (list.map((m) => rowHtml(m.code, m.name, `${m.names.size} different · ${m.qty} cards`)).join("") || `<div class="muted">No match.</div>`) + `</div>`;
+      if (q) {
+        if (!S.setList) { loadSetList(); }
+        const others = (S.setList || []).filter((s) => !mine.has(s.code) && (s.name.toLowerCase().includes(q) || s.code.includes(q))).slice(0, 40);
+        h += `<h3>Other sets</h3>` + (S.setList ? (others.map((s) => rowHtml(s.code, s.name, `${s.n} cards · ${s.date.slice(0, 4)}`)).join("") || `<div class="muted">No match.</div>`) : `<div class="muted">Loading the set list…</div>`);
+      }
+      return h;
+    }
+    const info = (S.setList || []).find((s) => s.code === v.code), nm = (colEntries().find((e) => e.set.toLowerCase() === v.code) || {}).setName || (info && info.name) || v.code.toUpperCase();
+    h += `<button class="back" data-act="setback">← All sets</button><h2>${esc(nm)} <span class="muted">(${esc(v.code.toUpperCase())})</span></h2>
+      <div class="chips vt"><button data-act="setmode" data-v="cards" class="${v.mode === "cards" ? "on" : ""}">By card</button><button data-act="setmode" data-v="prints" class="${v.mode === "prints" ? "on" : ""}">Every printing</button></div>
+      <div class="muted">${v.mode === "cards" ? "One entry per card. Counts as owned if you have any copy of it from this set." : "Every printing in the set, including variants. Matched on collector number."}</div>`;
+    const cl = setChecklist(v.code, v.mode);
+    if (!cl) { if (!v.loading && !v.err) loadSetCards(v.code, v.mode); return h; }
+    const have = cl.filter((c) => c.qty > 0).length, pct = cl.length ? Math.round((have / cl.length) * 100) : 0;
+    const byR = (r) => { const t = cl.filter((c) => c.r === r); return t.length ? `${r} ${t.filter((c) => c.qty > 0).length}/${t.length}` : ""; };
+    h += `<div class="card"><div class="row"><b>${have} of ${cl.length} cards</b><span class="muted">${pct}%</span></div><div class="bar"><i class="${pct === 100 ? "ok" : ""}" style="width:${pct}%"></i></div>
+      <div class="muted">${["common", "uncommon", "rare", "mythic"].map(byR).filter(Boolean).join(" · ")}</div></div>`;
+    const chip = (act, val, label, on) => `<button data-act="${act}" data-v="${val}" class="${on ? "on" : ""}">${label}</button>`;
+    h += `<div class="chips">${chip("setshow", "all", "All", v.show === "all")}${chip("setshow", "have", "Have " + have, v.show === "have")}${chip("setshow", "missing", "Missing " + (cl.length - have), v.show === "missing")}</div>
+      <div class="chips">${["common", "uncommon", "rare", "mythic"].map((r) => chip("setrar", r, r, v.rar.has(r))).join("")}</div>
+      <div class="row"><input type="text" id="setq" placeholder="Search this set…" value="${esc(v.q)}" autocomplete="off" style="flex:1"><span class="chips vt" style="margin:0">${chip("setlayout", "grid", "Images", v.layout === "grid")}${chip("setlayout", "list", "List", v.layout === "list")}</span></div>
+      <div><button class="btn alt" data-act="setexport">Export missing list</button></div><div id="setres">${setResults(cl)}</div>`;
+    return h;
+  }
+  function setFiltered(cl) {
+    const v = S.sv, q = v.q.toLowerCase();
+    return cl.filter((c) => (v.show === "all" || (v.show === "have" ? c.qty > 0 : c.qty === 0)) && (!v.rar.size || v.rar.has(c.r)) && (!q || c.n.toLowerCase().includes(q)));
+  }
+  function setResults(cl) {
+    const v = S.sv, fl = setFiltered(cl), shown = fl.slice(0, v.limit);
+    let h = `<div class="muted" style="margin:6px 0">${fl.length} shown</div>`;
+    if (v.layout === "list") h += shown.map((c) => `<div class="cardrow ${c.qty ? "" : "missing"}" data-act="zoom" data-key="${esc(c.key)}" data-sid="${esc(c.id)}"><div class="t"><span class="n">#${esc(c.cn)} ${esc(c.n)}</span><span class="muted">${c.qty ? "have " + c.qty : "missing"} · ${esc(c.r)}</span></div></div>`).join("");
+    else h += `<div class="colgrid">` + shown.map((c) => `<div class="ct ${c.qty ? "" : "missing"}" data-act="zoom" data-key="${esc(c.key)}" data-sid="${esc(c.id)}" data-peek="${esc(c.key)}"><img loading="lazy" alt="${esc(c.n)}" src="${esc(M.artUrl(c.id, "normal"))}">${c.qty > 1 ? `<span class="qty">${c.qty}×</span>` : ""}<span class="cnum">#${esc(c.cn)}</span></div>`).join("") + `</div>`;
+    if (fl.length > shown.length) h += `<button class="btn" data-act="setmore">Show 200 more</button>`;
+    return h;
+  }
+
   function vCollection() {
     if (!S.rows.length) return emptyMsg("No collection loaded yet. Add your read token in the Data tab.");
     const f = CF(), all = colEntries();
     const chip = (fld, v, label, on) => `<button data-act="colchip" data-f="${fld}" data-v="${esc(v)}" class="${on ? "on" : ""}">${label}</button>`;
     const pipb = (fld, c, on) => chip(fld, c, `<span class="pip pip-${c}">${c}</span>`, on);
-    let h = `<h2>Collection</h2><div class="chips vt"><button data-act="colview" data-v="binders" class="${f.view === "binders" ? "on" : ""}">Binders</button><button data-act="colview" data-v="cards" class="${f.view === "cards" ? "on" : ""}">All cards</button></div>`;
+    let h = `<h2>Collection</h2><div class="chips vt"><button data-act="colview" data-v="binders" class="${f.view === "binders" ? "on" : ""}">Binders</button><button data-act="colview" data-v="cards" class="${f.view === "cards" ? "on" : ""}">All cards</button><button data-act="colview" data-v="sets" class="${f.view === "sets" ? "on" : ""}">Sets</button></div>`;
+    if (f.view === "sets") return h + vSets();
     if (f.view === "binders") {
       const bs = M.binderSummary(S.rows);
       h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders. Tap a binder to look inside.${S.csvName ? ` Collection updated ${esc(csvDate() || S.csvName)}.` : ""}</div></div>`;
@@ -919,6 +1021,14 @@
       catch (e) { if (prev) d.targets = prev; else delete d.targets; S.error = e.message; S.saving = ""; }
       render();
     }
+    else if (a === "setopen") { S.sv.code = el.dataset.code; S.sv.show = "all"; S.sv.rar = new Set(); S.sv.q = ""; S.sv.limit = 200; S.sv.err = ""; render(); window.scrollTo(0, 0); }
+    else if (a === "setback") { S.sv.code = ""; S.sv.err = ""; render(); }
+    else if (a === "setmode") { S.sv.mode = el.dataset.v; S.sv.err = ""; S.sv.limit = 200; render(); }
+    else if (a === "setshow") { S.sv.show = el.dataset.v; S.sv.limit = 200; render(); }
+    else if (a === "setlayout") { S.sv.layout = el.dataset.v; render(); }
+    else if (a === "setrar") { const s = S.sv.rar, r = el.dataset.v; if (s.has(r)) s.delete(r); else s.add(r); S.sv.limit = 200; render(); }
+    else if (a === "setmore") { S.sv.limit += 200; const cl = setChecklist(S.sv.code, S.sv.mode); if (cl) $("#setres").innerHTML = setResults(cl); }
+    else if (a === "setexport") { const cl = setChecklist(S.sv.code, S.sv.mode) || [], miss = cl.filter((c) => !c.qty); showOut(`Missing from ${S.sv.code.toUpperCase()} (${miss.length})`, miss.map((c) => `1 ${c.n} (${S.sv.code.toUpperCase()}) ${c.cn}`).join("\n"), `missing_${S.sv.code}.txt`); }
     else if (a === "colview") { CF().view = el.dataset.v; render(); }
     else if (a === "collayout") { CF().layout = el.dataset.v; CF().limit = 120; render(); }
     else if (a === "colfilters") { CF().open = !CF().open; render(); }
@@ -957,6 +1067,8 @@
     else if (a === "forget") { S.token = ""; try { localStorage.removeItem("mtg_token"); } catch (e) { /* ignore */ } S.decks = []; S.rows = []; S.csvName = ""; recompute(); status(); render(); }
   });
   document.addEventListener("input", (ev) => {
+    if (ev.target.id === "setq") { S.sv.q = ev.target.value; S.sv.limit = 200; peekHide(); clearTimeout(S._setT); S._setT = setTimeout(() => { const cl = setChecklist(S.sv.code, S.sv.mode), r = $("#setres"); if (cl && r) r.innerHTML = setResults(cl); }, 150); return; }
+    if (ev.target.id === "setfind") { S.sv.find = ev.target.value; clearTimeout(S._setT); S._setT = setTimeout(() => { render(); const i = $("#setfind"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 250); return; }
     if (ev.target.id === "colq") { CF().q = ev.target.value; CF().limit = 120; peekHide(); clearTimeout(S._colT); S._colT = setTimeout(() => { const r = $("#colres"); if (r) r.innerHTML = colResults(); }, 150); return; }
     if (ev.target.id === "chq" && S.ch) { S.ch.q = ev.target.value; peekHide(); $("#chres").innerHTML = chooserResults(); }
   });
