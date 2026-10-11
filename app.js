@@ -1,4 +1,4 @@
-/* MTG Deck Tracker – UI. Read-only: all data comes from a private GitHub repo via a read-only token. */
+/* MTG Deck Tracker – UI. Reads a private GitHub data repo with a read-only token; swap buttons save with an optional write token. */
 (function () {
   "use strict";
   const M = window.MTG;
@@ -8,9 +8,9 @@
   const S = {
     tab: "decks", deck: null, token: "", cfg: { ...M.DEFAULT_CONFIG },
     idx: null, rows: [], csvName: "", own: new Map(), decks: [], claims: { hard: new Map(), soft: new Map() },
-    log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
+    wtoken: "", who: "", saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
   };
-  try { S.token = localStorage.getItem("mtg_token") || ""; } catch (e) { /* storage blocked */ }
+  try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; } catch (e) { /* storage blocked */ }
 
   /* ---------- GitHub ---------- */
   async function gh(path, raw) {
@@ -52,6 +52,7 @@
       S.decks = await Promise.all(deckFiles.map(async (f) => {
         const d = JSON.parse(await gh("decks/" + f.name, true));
         d.slug = f.name.replace(/\.json$/i, "");
+        d._sha = f.sha; d._orig = JSON.parse(JSON.stringify(d.pencilled || []));
         return d;
       }));
       try { S.wl = JSON.parse(await gh("wishlist.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.wl = []; }
@@ -66,6 +67,56 @@
       if (S.decks.length && S.tab === "data") S.tab = "decks";
     } catch (e) { S.error = e.message; }
     S.busy = ""; try { recompute(); } catch (e) { S.error = "Loaded, but processing failed: " + e.message; } status(); render();
+  }
+
+  /* ---------- saving (needs a write token) ---------- */
+  const b64 = (str) => { const by = new TextEncoder().encode(str); let bin = ""; by.forEach((c) => { bin += String.fromCharCode(c); }); return btoa(bin); };
+  async function saveDeck(d, message) {
+    if (!S.wtoken) throw new Error("Saving needs a write token — add it in Data (Contents: read and write, only " + S.cfg.dataRepo + ").");
+    const body = { ...d }; delete body.slug; delete body._sha; delete body._orig;
+    body.updated = new Date().toISOString().slice(0, 10);
+    const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/decks/${d.slug}.json`;
+    const put = (sha) => fetch(url, { method: "PUT", headers: { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" },
+      body: JSON.stringify({ message, content: b64(JSON.stringify(body, null, 2) + "\n"), sha, branch: S.cfg.branch }) });
+    let r = await put(d._sha);
+    if (r.status === 409 || r.status === 422) {
+      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" } });
+      if (!cur.ok) throw new Error("Save conflict and could not re-read the file (" + cur.status + ").");
+      const j = await cur.json();
+      const theirs = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(j.content.replace(/\s/g, "")), (c) => c.charCodeAt(0))));
+      if (JSON.stringify(theirs.pencilled || []) !== JSON.stringify(d._orig || [])) throw new Error("This deck was changed elsewhere since you loaded it. Reload (Data → Save & load) and redo the change.");
+      r = await put(j.sha);
+    }
+    if (r.status === 401 || r.status === 403 || r.status === 404) throw new Error("GitHub refused the save (" + r.status + ") — the write token needs Contents: read and write on " + S.cfg.dataRepo + ".");
+    if (!r.ok) throw new Error("Save failed: GitHub " + r.status);
+    const j = await r.json();
+    d._sha = j.content.sha; d.updated = body.updated; d._orig = JSON.parse(JSON.stringify(d.pencilled || []));
+  }
+  async function swapAction(slug, i, act) {
+    const d = deckBySlug(slug), p = d && (d.pencilled || [])[i];
+    if (!p) return;
+    const before = JSON.stringify(p), at = new Date().toISOString().slice(0, 10), by = S.who || "me";
+    const label = (p.in || "?") + (p.out ? " for " + p.out : "");
+    let msg = "";
+    if (act === "approve") { p.status = "approved"; msg = "Approved"; }
+    else if (act === "made") { p.status = "made"; msg = "Made by hand"; }
+    else if (act === "done") { p.status = "done"; msg = "Done in ManaBox"; }
+    else if (act === "revert") { p.status = "pencilled"; msg = "Back to pencilled"; }
+    else if (act === "cancel") { if (!confirm("Cancel this swap?\n" + label)) return; p.status = "dropped"; msg = "Cancelled"; }
+    else if (act === "change") {
+      const nm = (prompt("Which card went IN instead? (exact name; blank to keep " + (p.in || "none") + ")", "") || "").trim();
+      if (!nm) return;
+      const k = M.resolve(S.idx, nm);
+      if (!k) { S.error = `"${nm}" is not in the card DB — check the spelling (nothing saved).`; render(); return; }
+      p.log = (p.log || []).concat({ at, by, act: "changed IN", from: p.in || "" });
+      p.note = ((p.note ? p.note + " · " : "") + "was " + (p.in || "—")).trim();
+      p.in = k; msg = "Changed IN to " + k;
+    }
+    p.log = (p.log || []).concat({ at, by, act: msg });
+    S.error = ""; S.saving = "Saving…"; render();
+    try { await saveDeck(d, `Swap (${d.name || d.slug}): ${msg} — ${label}${S.who ? " [" + S.who + "]" : ""}`); S.saving = ""; recompute(); }
+    catch (e) { d.pencilled[i] = JSON.parse(before); S.error = e.message; S.saving = ""; }
+    status(); render();
   }
 
   function recompute() {
@@ -167,13 +218,18 @@
       ${pens.length ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with all swaps applied</button>` : ""}</div>`;
     const is = issuesFor(d.slug);
     if (is.length) h += `<h3>Checks</h3>` + is.map(issueHtml).join("");
+    const btn = (i, act, txt, alt) => `<button class="btn${alt ? " alt" : ""}" data-act="swap" data-slug="${esc(d.slug)}" data-i="${i}" data-sw="${act}">${txt}</button>`;
     const swapBlock = (list, cls) => list.map((p) => {
+      const i = (d.pencilled || []).indexOf(p), st = M.pencilStatus(p);
+      const btns = !S.wtoken ? "" : st === "made" ? btn(i, "done", "Mark done") + btn(i, "revert", "Undo", 1) + btn(i, "change", "Different card", 1)
+        : (st === "approved" ? "" : btn(i, "approve", "Approve")) + btn(i, "made", "I made it") + btn(i, "change", "Different card", 1) + btn(i, "cancel", "Cancel", 1);
       let x = `<div class="card"><span class="pill ${cls}">${esc(p.status || "pencilled")}</span> ${p.note ? `<span class="muted">${esc(p.note)}</span>` : ""}`;
       if (p.out) x += `<div class="muted">OUT</div>` + cardRow(M.keyOf(S.idx, p.out), p.out, 1, "out", true, "", d);
       if (p.in) { const k = M.keyOf(S.idx, p.in); x += `<div class="muted">IN</div>` + cardRow(k, p.in, 1, "in", true, ownPill(k, true), d); }
-      return x + `</div>`;
+      return x + (btns ? `<div>${btns}</div>` : "") + `</div>`;
     }).join("");
     const mades = pens.filter((p) => M.pencilStatus(p) === "made"), pencils = pens.filter((p) => M.pencilStatus(p) !== "made");
+    if (!S.wtoken && (mades.length || pencils.length)) h += `<div class="muted">Read-only. Add a write token in Data to confirm, change or cancel swaps here.</div>`;
     if (mades.length) h += `<h3>Made by hand — update ManaBox (${mades.length})</h3>` + swapBlock(mades, "todo");
     if (pencils.length) h += `<h3>Pencilled swaps (${pencils.length})</h3>` + swapBlock(pencils, "pencil");
     const wls = S.wlEval.filter((w) => (w.decks || []).includes(d.slug));
@@ -253,6 +309,10 @@
     let h = `<h2>Access</h2><div class="card"><div class="muted">A read-only fine-grained GitHub token (Contents: read, only <b>${esc(S.cfg.dataRepo)}</b>). Stored in this browser only.</div>
       <input type="password" id="tok" placeholder="github_pat_…" autocomplete="off" value="${esc(S.token)}">
       <button class="btn" data-act="savetok">Save &amp; load</button>${S.token ? `<button class="btn alt" data-act="forget">Forget token</button>` : ""}</div>`;
+    h += `<h2>Saving changes</h2><div class="card"><div class="muted">Optional. A second fine-grained token with <b>Contents: read and write</b>, only <b>${esc(S.cfg.dataRepo)}</b>. Lets the swap buttons save to the repo. Stored in this browser only.</div>
+      <input type="password" id="wtok" placeholder="github_pat_… (write)" autocomplete="off" value="${esc(S.wtoken)}">
+      <input type="text" id="who" placeholder="Your name (shown in the swap log)" value="${esc(S.who)}" style="margin-top:6px">
+      <button class="btn" data-act="savewtok">Save</button>${S.wtoken ? `<button class="btn alt" data-act="forgetw">Forget write token</button>` : ""}</div>`;
     if (S.log.length) h += `<div class="card muted">${S.log.map(esc).join("<br>")}</div>`;
     h += `<h2>Load local files</h2><div class="card"><div class="muted">Try things without the token: pick a ManaBox CSV and/or deck JSON files. Nothing leaves your device.</div>
       <input type="file" id="local" multiple accept=".csv,.json"></div>`;
@@ -275,7 +335,7 @@
     document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === S.tab));
     let h = "";
     if (S.error) h += `<div class="card lvl-error">${esc(S.error)}</div>`;
-    if (S.busy) h += `<div class="card muted">${esc(S.busy)}</div>`;
+    if (S.busy || S.saving) h += `<div class="card muted">${esc(S.busy || S.saving)}</div>`;
     h += outBox();
     h += { decks: vDecks, check: vCheck, trades: vTrades, wishlist: vWishlist, data: vData }[S.tab]();
     $("#view").innerHTML = h;
@@ -317,6 +377,9 @@
     else if (a === "pick") { el.checked ? S.picked.add(el.dataset.key) : S.picked.delete(el.dataset.key); }
     else if (a === "wishtext") showOut("Wishlist — still to find", (S._need || []).map((n) => "1 " + n).join("\n"), "wishlist.txt");
     else if (a === "savetok") { S.token = $("#tok").value.trim(); try { localStorage.setItem("mtg_token", S.token); } catch (e) { /* ignore */ } loadAll(); }
+    else if (a === "swap") swapAction(el.dataset.slug, +el.dataset.i, el.dataset.sw);
+    else if (a === "savewtok") { S.wtoken = $("#wtok").value.trim(); S.who = $("#who").value.trim(); try { localStorage.setItem("mtg_wtoken", S.wtoken); localStorage.setItem("mtg_who", S.who); } catch (e) { /* ignore */ } render(); }
+    else if (a === "forgetw") { S.wtoken = ""; try { localStorage.removeItem("mtg_wtoken"); } catch (e) { /* ignore */ } render(); }
     else if (a === "forget") { S.token = ""; try { localStorage.removeItem("mtg_token"); } catch (e) { /* ignore */ } S.decks = []; S.rows = []; S.csvName = ""; recompute(); status(); render(); }
   });
   document.addEventListener("change", async (ev) => {
