@@ -8,9 +8,9 @@
   const S = {
     tab: "decks", deck: null, token: "", cfg: { ...M.DEFAULT_CONFIG },
     idx: null, rows: [], csvName: "", own: new Map(), decks: [], claims: { hard: new Map(), soft: new Map() },
-    wtoken: "", who: "", saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
+    wtoken: "", who: "", dview: "stacks", zoom: null, saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, picked: null, out: null, error: "", busy: "", dbCount: 0,
   };
-  try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; } catch (e) { /* storage blocked */ }
+  try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; S.dview = localStorage.getItem("mtg_dview") || "stacks"; } catch (e) { /* storage blocked */ }
 
   /* ---------- GitHub ---------- */
   async function gh(path, raw) {
@@ -334,17 +334,18 @@
   function vDecks() {
     if (S.deck) return vDeck(deckBySlug(S.deck));
     if (!S.decks.length) return emptyMsg("No decks loaded yet.");
-    return S.decks.map((d) => {
+    return `<div class="tiles">` + S.decks.map((d) => {
       const m = M.deckMap(d, S.idx), tot = M.deckTotal(m), is = issuesFor(d.slug);
       const er = is.filter((i) => i.level === "error").length, wa = is.filter((i) => i.level === "warn").length;
       const act = M.activePencils(d), mm = new Map();
       const todo = act.filter((p) => M.pencilStatus(p) === "made" && !M.isReflected(d, p, S.idx)).length;
       const pc = act.filter((p) => M.pencilStatus(p) !== "made").length;
       const wn = S.wlEval.filter((w) => (w.decks || []).includes(d.slug) && ["missing", "partial"].includes(w.status)).length;
-      return `<div class="card click" data-act="open" data-slug="${esc(d.slug)}"><div class="row"><b>${esc(d.name || d.slug)}</b><span class="pill">${esc(d.status || "planned")}</span></div>
-        <div class="muted">${esc(M.commandersOf(d).join(" + "))} · ${tot} cards</div>
-        <div>${todo ? `<span class="pill todo">${todo} to do in ManaBox</span> ` : ""}${pc ? `<span class="pill pencil">${pc} pencilled</span> ` : ""}${er ? `<span class="pill err">${er} errors</span> ` : ""}${wa ? `<span class="pill warn">${wa} warnings</span> ` : ""}${wn ? `<span class="pill">${wn} on wishlist</span>` : ""}</div></div>`;
-    }).join("");
+      const cm = M.commandersOf(d);
+      return `<div class="tile" data-act="open" data-slug="${esc(d.slug)}">${cm.length ? artImg(M.keyOf(S.idx, cm[0]), cm[0], d, "art_crop", "tileimg") : ""}<div class="tilein"><div class="row"><b>${esc(d.name || d.slug)}</b><span class="pill">${esc(d.status || "planned")}</span></div>
+        <div class="muted">${esc(cm.join(" + "))} · ${tot} cards</div>
+        <div>${todo ? `<span class="pill todo">${todo} to do in ManaBox</span> ` : ""}${pc ? `<span class="pill pencil">${pc} pencilled</span> ` : ""}${er ? `<span class="pill err">${er} errors</span> ` : ""}${wa ? `<span class="pill warn">${wa} warnings</span> ` : ""}${wn ? `<span class="pill">${wn} on wishlist</span>` : ""}</div></div></div>`;
+    }).join("") + `</div>`;
   }
 
   function rebuildList(d) {
@@ -381,12 +382,17 @@
     if (!d) { S.deck = null; return vDecks(); }
     const m = M.deckMap(d, S.idx), pens = M.activePencils(d);
     const outKeys = new Set(pens.filter((p) => p.out).map((p) => M.keyOf(S.idx, p.out)));
-    let h = `<button class="back" data-act="back">← All decks</button><h2>${esc(d.name || d.slug)}</h2>
-      <div class="muted">${esc(M.commandersOf(d).join(" + "))} · ${esc(d.status || "planned")} · ${M.deckTotal(m)} cards${d.updated ? " · updated " + esc(d.updated) : ""}</div>
+    const cmds = M.commandersOf(d), ck = cmds.length ? M.keyOf(S.idx, cmds[0]) : "";
+    const nMade = pens.filter((p) => M.pencilStatus(p) === "made").length, nPen = pens.length - nMade;
+    let h = `<button class="back" data-act="back">← All decks</button>
+      <div class="hero">${ck ? artImg(ck, cmds[0], d, "art_crop", "heroimg") : ""}<div class="heroin"><div class="herot">${esc(d.name || d.slug)}</div>
+      <div class="herom">${esc(cmds.join(" + "))}</div>
+      <div class="herom">${esc(d.status || "planned")} · ${M.deckTotal(m)} cards${nMade ? ` · ${nMade} made by hand` : ""}${nPen ? ` · ${nPen} pencilled` : ""}${d.updated ? " · updated " + esc(d.updated) : ""}</div></div></div>
       <div><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
       ${pens.some((p) => M.pencilStatus(p) === "made") ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="physical">Export list as it is physically</button>` : ""}
       ${pens.some((p) => ["approved", "made"].includes(M.pencilStatus(p))) ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with confirmed changes</button>` : ""}</div>
       ${pens.some((p) => M.pencilStatus(p) === "pencilled") ? `<div class="muted">Pencilled swaps aren't in any export until you approve them.</div>` : ""}`;
+    const pre = h; h = "";
     const is = issuesFor(d.slug);
     if (is.length) h += `<h3>Checks</h3>` + is.map(issueHtml).join("");
     const btn = (i, act, txt, alt) => `<button class="btn${alt ? " alt" : ""}" data-act="swap" data-slug="${esc(d.slug)}" data-i="${i}" data-sw="${act}">${txt}</button>`;
@@ -428,12 +434,36 @@
     }
     const groups = {};
     for (const [k, e] of m) { const info = M.cardInfo(S.idx, k); const isCmd = M.commandersOf(d).some((c) => M.keyOf(S.idx, c) === k); (groups[isCmd ? "Commander" : groupOf(info)] = groups[isCmd ? "Commander" : groupOf(info)] || []).push({ k, e, info }); }
+    const view = S.dview || "stacks";
+    let cards = `<div class="chips vt">${["stacks", "grid", "list"].map((v) => `<button data-act="dview" data-v="${v}" class="${view === v ? "on" : ""}">${{ stacks: "Stacks", grid: "Grid", list: "List" }[v]}</button>`).join("")}</div>`;
+    if (view === "list") {
     for (const g of TYPE_ORDER) {
       if (!groups[g]) continue;
       const list = groups[g].sort((a, b) => a.e.name.localeCompare(b.e.name));
-      h += `<h3>${g} (${list.reduce((s, x) => s + x.e.qty, 0)})</h3>` + list.map((x) => cardRow(x.k, x.e.name, x.e.qty, outKeys.has(x.k) ? "out" : "", false, (outKeys.has(x.k) ? `<span class="pill pencil">out</span> ` : "") + (S.rows.length && !M.isBasic(x.e.name) && !S.own.get(x.k) && norm(d.status) === "built" ? `<span class="pill err">not in CSV</span>` : ""), d)).join("");
+      cards += `<h3>${g} (${list.reduce((s, x) => s + x.e.qty, 0)})</h3>` + list.map((x) => cardRow(x.k, x.e.name, x.e.qty, outKeys.has(x.k) ? "out" : "", false, (outKeys.has(x.k) ? `<span class="pill pencil">out</span> ` : "") + (S.rows.length && !M.isBasic(x.e.name) && !S.own.get(x.k) && norm(d.status) === "built" ? `<span class="pill err">not in CSV</span>` : ""), d)).join("");
     }
-    return h;
+    } else {
+      const tile = (x, last) => {
+        const out = outKeys.has(x.k), miss = S.rows.length && !M.isBasic(x.e.name) && !S.own.get(x.k) && norm(d.status) === "built";
+        return `<div class="ac${view === "grid" || last ? " full" : ""}${out ? " out" : ""}" data-act="zoom" data-key="${esc(x.k)}" data-slug="${esc(d.slug)}">${artImg(x.k, x.e.name, d, "normal", "acimg")}${x.e.qty > 1 ? `<span class="qty">${x.e.qty}×</span>` : ""}${out ? `<span class="tag out">OUT</span>` : ""}${miss ? `<span class="tag miss">not in CSV</span>` : ""}</div>`;
+      };
+      cards += `<div class="${view === "grid" ? "gridv" : "stacks"}">`;
+      for (const g of TYPE_ORDER) {
+        if (!groups[g]) continue;
+        const list = groups[g].sort((a, b) => a.e.name.localeCompare(b.e.name));
+        cards += `<div class="stack"><div class="sh">${g}<span>${list.reduce((s2, x) => s2 + x.e.qty, 0)}</span></div>${list.map((x, n) => tile(x, n === list.length - 1)).join("")}</div>`;
+      }
+      cards += `</div>`;
+    }
+    return pre + cards + h;
+  }
+  function zoomModal() {
+    if (!S.zoom) return "";
+    const d = deckBySlug(S.zoom.slug), k = S.zoom.key, info = M.cardInfo(S.idx, k), name = info ? info.name : k.replace(/^\?/, "");
+    const pr = M.pickSid(S.own, S.idx, k, d), o = S.own.get(k);
+    return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${artImg(k, name, d, "normal", "zimg")}${oracleBox(info, k)}
+      <div>${ownPill(k, true)} ${o ? `<span class="muted">${[...o.binders].map(([b, q]) => esc(b) + " ×" + q).join(", ")}</span>` : ""}</div>
+      <button class="btn" data-act="closezoom">Close</button></div></div>`;
   }
   const norm = M.norm;
 
@@ -526,6 +556,7 @@
     if (S.busy || S.saving) h += `<div class="card muted">${esc(S.busy || S.saving)}</div>`;
     h += outBox();
     h += { decks: vDecks, check: vCheck, trades: vTrades, wishlist: vWishlist, data: vData }[S.tab]();
+    h += zoomModal();
     $("#view").innerHTML = h;
   }
 
@@ -537,7 +568,7 @@
   }, true);
   document.addEventListener("click", async (ev) => {
     const tabBtn = ev.target.closest("#tabs button");
-    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.out = null; if (S.tab !== "decks") S.deck = null; render(); window.scrollTo(0, 0); return; }
+    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.out = null; S.zoom = null; if (S.tab !== "decks") S.deck = null; render(); window.scrollTo(0, 0); return; }
     const el = ev.target.closest("[data-act]");
     if (!el) return;
     const a = el.dataset.act;
@@ -566,6 +597,10 @@
     else if (a === "wishtext") showOut("Wishlist — still to find", (S._need || []).map((n) => "1 " + n).join("\n"), "wishlist.txt");
     else if (a === "savetok") { S.token = $("#tok").value.trim(); try { localStorage.setItem("mtg_token", S.token); } catch (e) { /* ignore */ } loadAll(); }
     else if (a === "bulkdone") bulkDone();
+    else if (a === "dview") { S.dview = el.dataset.v; try { localStorage.setItem("mtg_dview", S.dview); } catch (e) { /* ignore */ } render(); }
+    else if (a === "zoom") { S.zoom = { key: el.dataset.key, slug: el.dataset.slug }; render(); }
+    else if (a === "closezoom") { S.zoom = null; render(); }
+    else if (a === "noop") { /* keep modal open */ }
     else if (a === "addswap") addSwap(el.dataset.slug);
     else if (a === "rebuildcsv" || a === "rebuildtext") {
       const d = deckBySlug(el.dataset.slug), al = M.allocateDeck(d, rebuildList(d), S.own, S.cfg);
