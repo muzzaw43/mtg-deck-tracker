@@ -157,6 +157,7 @@ Your fork keeps working as it is. To receive improvements: on your fork's front 
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Scanner reads the bottom-left small print first** (faster and exact), only reading the title when that isn't enough; steadier messages, and moving straight to the next card now counts it.
 - **Scanner feedback and close-confirm fix:** the scanner now says what it read, and names cards that aren't on the deck's list so you can tell it's working; the "Close the app?" prompt is armed on your first tap so Chrome can't skip it.
 - **Check deck:** tick list for a physical deck plus a camera scanner that reads the name and the set/number line.
 - **Live prices** (Scryfall, converted to AUD), loaded in the background; upgrade finder now shows card images with a reason for each suggestion.

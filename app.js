@@ -684,7 +684,7 @@
     return lines.join("\n") + "\n";
   }
   // ----- camera scanner (overlay outside #view so re-renders don't kill the video) -----
-  let scanReads = 0, scanEl = null, scanLast = { key: "", n: 0 }, scanLock = false, scanLog = [];
+  let scanMiss = 0, scanLockId = "", scanHold = 0, scanReads = 0, scanEl = null, scanLast = { key: "", n: 0 }, scanLock = false, scanLog = [];
   function scanMsg(html) { const m = scanEl && scanEl.querySelector("#scanmsg"); if (m) m.innerHTML = html; }
   function tkCount(e, seenNote) {
     const t = S.tk; t.st.got[e.id] = Math.min(e.qty, tkGot(e) + 1);
@@ -696,17 +696,22 @@
     const m = M.matchScan(t.entries, t.st, r.title, r.bottom);
     const key = m.kind === "none" ? "" : m.kind + "|" + (m.entry ? m.entry.id : "") + "|" + (m.seen.set || "") + (m.seen.cn || "");
     if (!key) {
-      scanLast = { key: "", n: 0 }; scanLock = false;
+      scanLast = { key: "", n: 0 }; if (++scanMiss >= 2) { scanLock = false; scanLockId = ""; }
+      if (Date.now() < scanHold) return;
       const tt = (r.title || "").trim().split("\n")[0].trim(), bb = (r.bottom || "").trim().replace(/\s*\n\s*/g, " / "), cl = m.seen;
       const any = tt ? M.matchAnyTitle(S.idx, tt) : null, nm = any ? (M.cardInfo(S.idx, any.key) || {}).name : "";
       scanReads++;
       const raw = `<div class="muted scanraw">Read #${scanReads}: title “${esc(tt) || "—"}” · small print “${esc(bb) || "—"}”</div>`;
+      if (nm) scanHold = Date.now() + 3000;
       if (nm) scanMsg(`<b>${esc(plain(nm))}</b>${cl.set && cl.cn ? ` (${esc(cl.set)} #${esc(cl.cn)})` : ""} isn't on this deck's list.<div class="row"><button class="btn alt" data-act="scanextra" data-seen="${esc(cl.set && cl.cn ? cl.set + " #" + cl.cn : "")}" data-name="${esc(nm)}">Note as extra</button></div>${raw}`);
       else scanMsg(`<span class="muted">Can't match that yet. Fill the frame with the card, flat and well lit, name at the top and the small print at the bottom both inside it.</span>${raw}`);
       return;
     }
+    if (scanLock) { if (m.entry && m.entry.id === scanLockId) { scanMiss = 0; return; } if (++scanMiss < 2) return; scanLock = false; scanLockId = ""; }
     scanLast = scanLast.key === key ? { key, n: scanLast.n + 1 } : { key, n: 1 };
-    if (scanLast.n < 2 || scanLock) { if (!scanLock) scanMsg(`<span class="muted">Reading… ${esc(plain(m.entry.name))}</span>`); return; }
+    if (scanLast.n < 2) return;
+    scanMiss = 0; scanLockId = m.entry ? m.entry.id : "";
+    scanHold = Date.now() + (m.kind === "diff" ? 12000 : 3000);
     scanLock = true; // one tick per card: the frame has to go blank or change before the next one counts
     const e = m.entry, seen = m.seen.set && m.seen.cn ? `${m.seen.set} #${m.seen.cn}${m.seen.star ? " ★" : ""}` : "";
     if (m.kind === "exact") {
@@ -738,7 +743,7 @@
       const vid = $("#scanv"), fit = () => { const w = scanEl && scanEl.querySelector(".scanwrap"), fr = scanEl && scanEl.querySelector(".scanframe"); if (!w || !fr || !vid.videoWidth) return; const k = Math.min(w.clientWidth / vid.videoWidth, w.clientHeight / vid.videoHeight), c = window.MTGScan.cardRect(vid.videoWidth, vid.videoHeight); fr.style.height = c.h * k + "px"; fr.style.maxWidth = "none"; fr.style.width = c.w * k + "px"; };
       fit(); window.addEventListener("resize", fit); vid.addEventListener("loadedmetadata", fit);
       scanMsg(`<span class="muted">Hold a card inside the frame.</span>`);
-      window.MTGScan.loop($("#scanv"), (r) => { const p = $("#scanprog"); if (p) { const x = tkTotals(); p.textContent = `${x.have} of ${x.want} found`; } scanResult(r); });
+      window.MTGScan.loop($("#scanv"), (r) => { const p = $("#scanprog"); if (p) { const x = tkTotals(); p.textContent = `${x.have} of ${x.want} found`; } scanResult(r); }, (b) => S.tk && M.matchScan(S.tk.entries, S.tk.st, "", b).kind === "exact");
     } catch (e) { scanMsg(`<span class="err">${esc(e.name === "NotAllowedError" ? "Camera permission was refused. Allow it in the browser's site settings and try again." : e.message)}</span>`); }
   }
   function scanStop() { try { window.MTGScan.stop(); } catch (e) { /* ignore */ } if (scanEl) { scanEl.remove(); scanEl = null; } scanLast = { key: "", n: 0 }; scanLock = false; S.scanPend = null; render(); }

@@ -42,11 +42,12 @@
     if (cw > w * 0.92) { cw = w * 0.92; ch = cw / RATIO; }
     return { x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch, fx: (w - cw) / 2 / w, fy: (h - ch) / 2 / h, fw: cw / w, fh: ch / h };
   }
-  async function readFrame(src, w, h, which) {
+  // Bottom-left small print first (it identifies the exact printing); the title is only read when that wasn't enough.
+  async function readFrame(src, w, h, enough) {
     const card = cardRect(w, h), ws = await init();
     const out = { title: "", bottom: "" };
-    if (!which || which === "title") out.title = (await ws.title.recognize(strip(src, card, 0.05, 0.035, 0.80, 0.105, 700))).data.text;
-    if (!which || which === "bottom") out.bottom = (await ws.bottom.recognize(strip(src, card, 0.03, 0.915, 0.60, 0.985, 900))).data.text;
+    out.bottom = (await ws.bottom.recognize(strip(src, card, 0.03, 0.915, 0.60, 0.985, 900))).data.text;
+    if (!enough || !enough(out.bottom)) out.title = (await ws.title.recognize(strip(src, card, 0.05, 0.035, 0.80, 0.105, 700))).data.text;
     return out;
   }
   async function start(video, onStatus) {
@@ -56,11 +57,11 @@
     await init(onStatus);
   }
   // Calls onRead({title,bottom}) about every 600ms while running (one read at a time).
-  function loop(video, onRead) {
+  function loop(video, onRead, enough) {
     running = true;
     const tick = async () => {
       if (!running) return;
-      if (!busy && video.videoWidth) { busy = true; try { const rr = await readFrame(video, video.videoWidth, video.videoHeight); window.__lastRead = { rr, w: video.videoWidth, h: video.videoHeight }; onRead(rr); } catch (e) { /* skip frame */ } busy = false; }
+      if (!busy && video.videoWidth) { busy = true; try { const rr = await readFrame(video, video.videoWidth, video.videoHeight, enough); window.__lastRead = { rr, w: video.videoWidth, h: video.videoHeight }; onRead(rr); } catch (e) { /* skip frame */ } busy = false; }
       if (running) setTimeout(tick, 250);
     };
     tick();
