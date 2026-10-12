@@ -108,6 +108,7 @@
       mv: faces[0].manaValue,
       ci,
       text: faces.map((f) => (faces.length > 1 && f.faceName ? f.faceName + ": " : "") + (f.text || "")).join("\n——\n"),
+      legal: faces.every((f) => f.commanderLegal !== false),
       colors: (faces[0].colors || "").split(",").map((s) => s.trim()).filter(Boolean),
       pt: faces[0].power != null && faces[0].power !== "" ? faces[0].power + "/" + faces[0].toughness : "",
       keywords: faces.map((f) => f.keywords || "").filter(Boolean).join(", "),
@@ -261,6 +262,7 @@
       for (const [key, e] of m) {
         const info = cardInfo(idx, key);
         if (!info) { add("error", d, e.name, "Not found in the card DB"); continue; }
+        if (info.legal === false) add("info", d, info.name, "The card DB flags this as not Commander-legal. That flag looks unreliable for some cards (it also marks plain legal cards), so double-check it before acting on it.");
         if (cmdCI && info.ci.some((c) => !cmdCI.includes(c)))
           add("error", d, info.name, `Colour identity ${info.ci.join("") || "C"} is outside the commander's (${[...new Set(cmdCI)].join("") || "C"})`);
         if (e.qty > 1 && !isBasic(info.name) && !info.anyNumber)
@@ -400,6 +402,49 @@
         lines.push([t.name, r.set, r.cn, r.foil, r.qty, r.sid].map(csvEscape).join(","));
     return lines.join("\n");
   }
+
+  /* ---------- Where is a card / upgrade finder ---------- */
+  function whereIs(key, decks, idx, own, claims, cfg) {
+    const out = { decks: [], pencilIn: [], pencilOut: [], binders: [], total: 0, free: 0, hard: sumQty(claims && claims.hard.get(key)), soft: sumQty(claims && claims.soft.get(key)) };
+    for (const d of decks) {
+      const m = deckMap(d, idx), e = m.get(key);
+      if (e) out.decks.push({ slug: d.slug, name: d.name || d.slug, qty: e.qty, status: d.status || "planned" });
+      for (const p of activePencils(d)) {
+        if (p.in && keyOf(idx, p.in) === key) out.pencilIn.push({ slug: d.slug, name: d.name || d.slug, status: pencilStatus(p) });
+        if (p.out && keyOf(idx, p.out) === key) out.pencilOut.push({ slug: d.slug, name: d.name || d.slug, status: pencilStatus(p) });
+      }
+    }
+    const o = own && own.get(key), fr = new Set(((cfg && cfg.freeBinders) || []).map(norm));
+    if (o) { out.total = o.total; for (const [b, q] of o.binders) { out.binders.push({ binder: b, qty: q, free: fr.has(norm(b)) }); if (fr.has(norm(b))) out.free += q; } }
+    return out;
+  }
+  const GAP_ROLES = ["ramp", "draw", "targeted", "mass"];
+  function upgradeCandidates(deck, idx, own, claims, cfg, st) {
+    const m = deckMap(deck, idx), ci = new Set();
+    for (const c of commandersOf(deck)) { const i = cardInfo(idx, keyOf(idx, c)); if (i) i.ci.forEach((x) => ci.add(x)); }
+    const pencIn = new Set(activePencils(deck).filter((p) => p.in).map((p) => keyOf(idx, p.in)));
+    const fr = new Set(cfg.freeBinders.map(norm));
+    const gaps = {}; for (const r of GAP_ROLES) gaps[r] = Math.max(0, (st.targets[r] || 0) - (st.counts[r] || 0));
+    const lists = { ramp: [], draw: [], targeted: [], mass: [] };
+    for (const o of own.values()) {
+      if (isBasic(o.name) || m.has(o.key) || pencIn.has(o.key)) continue;
+      const info = cardInfo(idx, o.key);
+      if (!info || /\bLand\b/.test(info.frontType)) continue;
+      if (!info.ci.every((c) => ci.has(c))) continue;
+      const hard = sumQty(claims.hard.get(o.key)), soft = sumQty(claims.soft.get(o.key)), avail = o.total - hard;
+      if (avail <= 0) continue;
+      const freeQty = o.rows.reduce((s, r) => s + (fr.has(norm(r.binder)) ? r.qty : 0), 0);
+      const ex = classifyRolesEx(info), roles = GAP_ROLES.filter((r) => ex[r] === "strong");
+      if (!roles.length) continue;
+      const filled = roles.filter((r) => gaps[r] > 0).length;
+      const rec = { key: o.key, name: info.name, info, roles, illegal: info.legal === false, free: freeQty, avail, soft, binders: [...o.binders].map(([b, q]) => ({ binder: b, qty: q })), score: filled * 10 + (freeQty > 0 ? 5 : 0) - Math.min(7, info.mv || 0) * 0.5 };
+      for (const r of roles) lists[r].push(rec);
+    }
+    for (const r of GAP_ROLES) lists[r].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+    return { gaps, lists };
+  }
+  const deckValue = (rows, deck) => rows.reduce((s, r) => (norm(r.binder) === norm(deck.name || "") ? s + (rowAUD(r) || 0) * r.qty : s), 0);
+
   /* ---------- Rebuild a deck from the collection (choose printings) ---------- */
   // Rows of this card that could go in this deck: its own deck binder, free binders, and spare copies in multi-copy binders.
   function eligibleRows(own, key, deck, cfg) {
@@ -491,10 +536,11 @@
           cost: info ? info.cost : "", text: info ? info.text : "", pt: info ? info.pt : "", keywords: info ? info.keywords : "" };
         m.set(id, e);
       }
+      { const p = rowAUD(r); if (p != null) { e._pv = (e._pv || 0) + p * r.qty; e._pq = (e._pq || 0) + r.qty; } }
       e.qty += r.qty; e.binders.set(r.binder, (e.binders.get(r.binder) || 0) + r.qty);
       if (!e.sid && r.sid) e.sid = r.sid;
     }
-    return [...m.values()];
+    const arr = [...m.values()]; for (const e of arr) { e.price = e._pq ? e._pv / e._pq : null; e.value = e._pq ? e._pv : null; } return arr;
   }
   const plainName = (n) => (n || "").split(" // ").length === 2 && n.split(" // ")[0] === n.split(" // ")[1] ? n.split(" // ")[0] : n;
   const TYPE_CHIPS = ["Creature", "Instant", "Sorcery", "Artifact", "Enchantment", "Planeswalker", "Land", "Battle"];
@@ -536,6 +582,7 @@
       rarity: (a, b) => (RARITY_ORDER[a.rarity] ?? 9) - (RARITY_ORDER[b.rarity] ?? 9) || a.name.localeCompare(b.name),
       type: (a, b) => a.frontType.localeCompare(b.frontType) || a.name.localeCompare(b.name),
       qty: (a, b) => a.qty - b.qty || a.name.localeCompare(b.name),
+      price: (a, b) => (a.price ?? -1) - (b.price ?? -1) || a.name.localeCompare(b.name),
     }[by] || ((a, b) => a.name.localeCompare(b.name));
     return list.slice().sort((a, b) => cmp(a, b) * (dir < 0 ? -1 : 1));
   }
@@ -543,8 +590,8 @@
     const m = new Map();
     for (const r of rows) {
       let b = m.get(r.binder);
-      if (!b) { b = { name: r.binder, btype: r.btype, qty: 0, names: new Set(), sid: "", rname: "" }; m.set(r.binder, b); }
-      b.qty += r.qty; b.names.add(r.name);
+      if (!b) { b = { name: r.binder, btype: r.btype, qty: 0, value: 0, names: new Set(), sid: "", rname: "" }; m.set(r.binder, b); }
+      b.qty += r.qty; { const p = rowAUD(r); if (p != null) b.value += p * r.qty; } b.names.add(r.name);
       if (!b.sid && r.sid) { b.sid = r.sid; b.rname = r.name; }
     }
     return [...m.values()].map((b) => ({ ...b, unique: b.names.size })).sort((a, b) => a.name.localeCompare(b.name));
@@ -736,7 +783,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;

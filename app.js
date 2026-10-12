@@ -103,6 +103,7 @@
       if (csvs.length) { const fixed = csvs.find((f) => f.name === "ManaBox_Collection.csv"); name = (fixed || csvs[csvs.length - 1]).name; text = await gh("collection/" + name, true); }
       await dbP;
       if (text) { S.rows = M.parseCollection(text); S.csvName = name; }
+      if (text) { try { const cr = await fetch(`https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/commits?path=${encodeURIComponent("collection/" + name)}&per_page=1&sha=${encodeURIComponent(S.cfg.branch)}`, { headers: { Authorization: "Bearer " + S.token, Accept: "application/vnd.github+json" } }); const cj = cr.ok ? await cr.json() : null; S.csvAt = Array.isArray(cj) && cj[0] ? cj[0].commit.committer.date : ""; } catch (e) { S.csvAt = ""; } }
       S.log.push(`Decks found: ${S.decks.length}` + (deckFiles.length ? "" : " (no .json files in decks/)"));
       S.log.push(text ? `Collection: ${name} (${S.rows.length} rows)` : "Collection: no .csv found in collection/");
       S.log.push(`Card DB: ${S.dbCount} cards`);
@@ -113,6 +114,20 @@
 
   /* ---------- saving (needs a write token) ---------- */
   const b64 = (str) => { const by = new TextEncoder().encode(str); let bin = ""; by.forEach((c) => { bin += String.fromCharCode(c); }); return btoa(bin); };
+  async function addToWishlist(name, slug, note) {
+    if (!S.wtoken) throw new Error("Saving needs a write token — add it in Data.");
+    const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/wishlist.json`, hd = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
+    const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: hd });
+    let list = [], sha;
+    if (cur.ok) { const j = await cur.json(); sha = j.sha; list = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(j.content.replace(/\s/g, "")), (c) => c.charCodeAt(0)))); }
+    else if (cur.status !== 404) throw new Error("Couldn't read the wishlist (" + cur.status + ").");
+    const hit = list.find((w) => norm(w.name) === norm(name));
+    if (hit) { hit.decks = hit.decks || []; if (slug && !hit.decks.includes(slug)) hit.decks.push(slug); }
+    else list.push({ name, decks: slug ? [slug] : [], kind: "want", note: note || "" });
+    const r = await fetch(url, { method: "PUT", headers: hd, body: JSON.stringify({ message: `Wishlist: ${name}${S.who ? " [" + S.who + "]" : ""}`, content: b64(JSON.stringify(list, null, 1) + "\n"), sha, branch: S.cfg.branch }) });
+    if (!r.ok) throw new Error("Wishlist save failed: GitHub " + r.status);
+    S.wl = list;
+  }
   async function saveDeck(d, message) {
     if (!S.wtoken) throw new Error("Saving needs a write token — add it in Data (Contents: read and write, only " + S.cfg.dataRepo + ").");
     const body = { ...d }; delete body.slug; delete body._sha; delete body._orig; delete body._mb;
@@ -157,7 +172,7 @@
       const pr = await fetch(base + CSV_PATH, { method: "PUT", headers: H, body: JSON.stringify({
         message: `Collection update: ${file.name} (${rows.length} rows)${S.who ? " [" + S.who + "]" : ""}`, content: b64(text), sha: ex ? ex.sha : undefined, branch: S.cfg.branch }) });
       if (!pr.ok) throw new Error("Upload failed: GitHub " + pr.status);
-      S.rows = rows; S.csvName = "ManaBox_Collection.csv";
+      S.rows = rows; S.csvName = "ManaBox_Collection.csv"; S.csvAt = new Date().toISOString();
       S.log.push(`Uploaded ${file.name}: ${rows.length} rows (was ${oldN})`);
       S.saving = ""; recompute(); S.tab = "data"; S.deck = null; resetNav();
     } catch (e) { S.error = e.message; S.saving = ""; }
@@ -398,12 +413,37 @@
   }
 
   /* ---------- views ---------- */
+  function csvAgeDays() {
+    const m = /(\d{4})(\d{2})(\d{2})/.exec(S.csvName || "");
+    const t = m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : S.csvAt ? Date.parse(S.csvAt) : NaN;
+    return isFinite(t) ? Math.floor((Date.now() - t) / 864e5) : null;
+  }
+  function findResults(q) {
+    const toks = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!toks.length || !S.idx) return "";
+    const names = new Map();
+    for (const o of S.own.values()) names.set(o.key, o.name);
+    for (const d of S.decks) for (const [k, e] of M.deckMap(d, S.idx)) if (!names.has(k)) names.set(k, e.name);
+    const hits = [...names].filter(([, n]) => toks.every((t) => n.toLowerCase().includes(t))).sort((a, b) => a[1].localeCompare(b[1])).slice(0, 12);
+    if (!hits.length) return `<div class="muted">No card matches.</div>`;
+    return hits.map(([k, n]) => {
+      const w = M.whereIs(k, S.decks, S.idx, S.own, S.claims, S.cfg), bits = [];
+      bits.push(w.decks.length ? "in " + w.decks.map((x) => esc(x.name)).join(", ") : "not in a deck");
+      if (w.pencilIn.length) bits.push("pencilled IN: " + w.pencilIn.map((x) => esc(x.name)).join(", "));
+      if (w.pencilOut.length) bits.push("pencilled OUT: " + w.pencilOut.map((x) => esc(x.name)).join(", "));
+      bits.push(w.total ? `${w.total} owned (${w.free} in free binders)` : "not owned");
+      return `<div class="cardrow" data-act="zoom" data-key="${esc(k)}" data-slug="" data-peek="${esc(k)}"><div class="t"><span class="n">${esc(plain(n))}</span></div><div class="muted">${bits.join(" · ")}</div></div>`;
+    }).join("");
+  }
   function vDecks() {
     if (S.deck) return vDeck(deckBySlug(S.deck));
     if (!S.decks.length) return emptyMsg("No decks loaded yet.");
     const rq = reviewQueue();
+    const mm = S.decks.reduce((s, d) => s + M.activePencils(d).filter((p) => M.pencilStatus(p) === "made" && !M.isReflected(d, p, S.idx)).length, 0), age = csvAgeDays();
+    const stale = S.rows.length && (mm || (age != null && age >= 7)) ? `<div class="card lvl-warn">${mm ? `<b>${mm} swap${mm > 1 ? "s" : ""} made by hand ${mm > 1 ? "aren't" : "isn't"} in the collection file yet.</b> Update ManaBox, export it and upload the new CSV (Data tab). ` : ""}${age != null && age >= 7 ? `The collection file is ${age} days old.` : ""}</div>` : "";
+    const findbox = `<input type="text" id="findq" placeholder="Where is a card? Search your decks and collection…" value="${esc(S.findq || "")}" autocomplete="off" style="width:100%;margin:6px 0"><div id="findres">${findResults(S.findq || "")}</div>`;
     const rbox = rq.length && S.reviewer ? `<div class="card"><b>Swaps to review (${rq.length})</b>${rq.map(({ d, p }) => `<div class="row" data-act="open" data-slug="${esc(d.slug)}" style="cursor:pointer"><span>${esc(d.name || d.slug)}: <b>${esc(p.in || "?")}</b>${p.out ? " for " + esc(p.out) : ""}<div class="muted">${esc(swapAuthor(p))}${(p.comments || []).length ? " — " + esc(p.comments[0].text) : ""}</div></span><span class="muted">open →</span></div>`).join("")}</div>` : "";
-    return rbox + `<div class="tiles">` + S.decks.map((d) => {
+    return stale + rbox + findbox + `<div class="tiles">` + S.decks.map((d) => {
       const m = M.deckMap(d, S.idx), tot = M.deckTotal(m), is = issuesFor(d.slug);
       const er = is.filter((i) => i.level === "error").length, wa = is.filter((i) => i.level === "warn").length;
       const act = M.activePencils(d), mm = new Map();
@@ -498,6 +538,22 @@
     return h;
   }
 
+  function upgradePanel(d) {
+    const st = M.deckStats(d, S.idx, statsList(d), S.cfg), u = M.upgradeCandidates(d, S.idx, S.own, S.claims, S.cfg, st);
+    const role = S.upgRole || M.GAP_ROLES.slice().sort((x, y) => u.gaps[y] - u.gaps[x])[0];
+    const lab = { ramp: "Ramp", draw: "Card advantage", targeted: "Targeted", mass: "Mass" };
+    let h = `<div class="card"><div class="row"><b>Upgrade finder</b><button class="btn alt" data-act="upg">Close</button></div>
+      <div class="muted">Cards you own, in this deck's colours, not already in it and not locked in another built deck, that fill a role. It only suggests: pick one, then choose the card to cut, and it's added as a pencilled swap. Roles are guessed from card text.</div>
+      <div class="chips vt">${M.GAP_ROLES.map((r) => `<button data-act="upgrole" data-r="${r}" class="${role === r ? "on" : ""}">${lab[r]} ${u.gaps[r] ? `<span class="pill err">short ${u.gaps[r]}</span>` : `<span class="muted">at target</span>`} · ${u.lists[r].length}</button>`).join("")}</div>`;
+    const list = u.lists[role], lim = S.upgLimit || 25;
+    h += list.slice(0, lim).map((c) => `<div class="card"><div class="row"><b>${esc(plain(c.name))}</b><span class="muted">${esc(c.info.cost)}</span></div>
+      <div class="muted">${esc(c.info.type)}${c.roles.length > 1 ? " · also " + c.roles.filter((r) => r !== role).map((r) => lab[r]).join(", ") : ""}</div>
+      <div class="oracle">${esc(c.info.text)}</div>
+      <div class="muted">${c.free ? `${c.free} in free binders` : "not in a free binder"}: ${esc(c.binders.map((b) => b.binder + " ×" + b.qty).join(", "))}${c.soft ? " · wanted by a planned/pencilled deck" : ""}${c.illegal ? " · DB flags it not Commander-legal (flag can be wrong)" : ""}</div>
+      <button class="btn" data-act="zoom" data-key="${esc(c.key)}" data-slug="${esc(d.slug)}">View</button>${S.wtoken ? `<button class="btn alt" data-act="upgpick" data-slug="${esc(d.slug)}" data-key="${esc(c.key)}">Pencil in…</button>` : ""}</div>`).join("") || `<div class="muted">Nothing owned fits here.</div>`;
+    if (list.length > lim) h += `<button class="btn" data-act="upgmore">Show more</button>`;
+    return h + `</div>`;
+  }
   function vDeck(d) {
     if (!d) { S.deck = null; return vDecks(); }
     const m = M.deckMap(d, S.idx), pens = M.activePencils(d);
@@ -507,12 +563,12 @@
     let h = `<button class="back" data-act="back">← All decks</button>
       <div class="hero">${ck ? artImg(ck, cmds[0], d, "art_crop", "heroimg") : ""}<div class="heroin"><div class="herot">${esc(d.name || d.slug)}</div>
       <div class="herom">${esc(cmds.join(" + "))}</div>
-      <div class="herom">${esc(d.status || "planned")} · ${M.deckTotal(m)} cards${nMade ? ` · ${nMade} made by hand` : ""}${nPen ? ` · ${nPen} pencilled` : ""}${d.updated ? " · updated " + esc(d.updated) : ""}</div></div></div>
-      <div><button class="btn" data-act="stats">${S.statsOpen ? "Hide stats" : "Deck stats"}</button><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
+      <div class="herom">${esc(d.status || "planned")} · ${M.deckTotal(m)} cards${S.rows.length && M.deckValue(S.rows, d) ? ` · worth about $${M.deckValue(S.rows, d).toFixed(0)} AUD` : ""}${nMade ? ` · ${nMade} made by hand` : ""}${nPen ? ` · ${nPen} pencilled` : ""}${d.updated ? " · updated " + esc(d.updated) : ""}</div></div></div>
+      <div><button class="btn" data-act="stats">${S.statsOpen ? "Hide stats" : "Deck stats"}</button><button class="btn" data-act="upg">${S.upgOpen ? "Hide upgrades" : "Upgrade finder"}</button><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
       ${pens.some((p) => M.pencilStatus(p) === "made") ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="physical">Export list as it is physically</button>` : ""}
       ${pens.some((p) => ["approved", "made"].includes(M.pencilStatus(p))) ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with confirmed changes</button>` : ""}</div>
       ${pens.some((p) => M.pencilStatus(p) === "pencilled") ? `<div class="muted">Pencilled swaps aren't in any export until you approve them.</div>` : ""}`;
-    const pre = h + (S.statsOpen ? statsPanel(d) : ""); h = "";
+    const pre = h + (S.statsOpen ? statsPanel(d) : "") + (S.upgOpen ? upgradePanel(d) : ""); h = "";
     const is = issuesFor(d.slug);
     if (is.length) h += `<h3>Checks</h3>` + is.map(issueHtml).join("");
     const btn = (i, act, txt, alt) => `<button class="btn${alt ? " alt" : ""}" data-act="swap" data-slug="${esc(d.slug)}" data-i="${i}" data-sw="${act}">${txt}</button>`;
@@ -623,9 +679,13 @@
     const d = deckBySlug(S.zoom.slug), k = S.zoom.key, info = M.cardInfo(S.idx, k), name = info ? info.name : k.replace(/^\?/, "");
     const pr = S.zoom.sid || M.pickSid(S.own, S.idx, k, d), o = S.own.get(k);
     const zi = S.zoom.sid ? `<img class="zimg" alt="" src="${esc(M.artUrl(S.zoom.sid, "normal"))}" data-fb="${esc(M.artByName(name, "normal"))}">` : artImg(k, name, d, "normal", "zimg");
-    const copies = o ? `<div class="muted" style="margin-top:6px">Your copies</div>` + o.rows.map((r) => `<div class="muted">${r.qty}× ${esc(r.setName || r.set)} (${esc((r.set || "").toUpperCase())}) #${esc(r.cn)}${/foil|etched/i.test(r.foil || "") ? " · " + esc(r.foil) : ""} · ${esc(r.binder)}</div>`).join("") : "";
+    const copies = o ? `<div class="muted" style="margin-top:6px">Your copies</div>` + o.rows.map((r) => { const pr2 = M.rowAUD(r); return `<div class="muted">${r.qty}× ${esc(r.setName || r.set)} (${esc((r.set || "").toUpperCase())}) #${esc(r.cn)}${/foil|etched/i.test(r.foil || "") ? " · " + esc(r.foil) : ""} · ${esc(r.binder)}${pr2 != null ? " · $" + pr2.toFixed(2) : ""}</div>`; }).join("") : "";
+    const wh = S.rows.length ? M.whereIs(k, S.decks, S.idx, S.own, S.claims, S.cfg) : null, nmz = S.zoom.name || name;
+    const wl = S.wl.find((w) => norm(w.name) === norm(nmz));
+    const where = wh ? `<div class="muted" style="margin-top:6px">${wh.decks.length ? "Played in: " + wh.decks.map((x) => esc(x.name) + (x.status !== "built" ? " (" + esc(x.status) + ")" : "")).join(", ") : "Not in any deck"}${wh.pencilIn.length ? "<br>Pencilled IN for: " + wh.pencilIn.map((x) => esc(x.name)).join(", ") : ""}${wh.pencilOut.length ? "<br>Pencilled OUT of: " + wh.pencilOut.map((x) => esc(x.name)).join(", ") : ""}${wh.total ? `<br>${wh.free} of ${wh.total} in free binders` : ""}</div>` : "";
+    const wlbox = S.wtoken ? `<div class="muted" style="margin-top:6px">${wl ? "On the wishlist" + ((wl.decks || []).length ? " for " + esc(wl.decks.map((s2) => (deckBySlug(s2) || { name: s2 }).name || s2).join(", ")) : "") + ". " : ""}Add to wishlist for:</div><div class="row"><select id="wldeck"><option value="">no particular deck</option>${S.decks.map((x) => `<option value="${esc(x.slug)}" ${d && d.slug === x.slug ? "selected" : ""}>${esc(x.name || x.slug)}</option>`).join("")}</select><button class="btn" data-act="wladd" data-name="${esc(nmz)}">Add</button></div>` : "";
     return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${zi}${oracleBox(info, k)}${copies}
-      <div id="rulings" class="rul" data-sid="${esc(pr || "")}"></div>
+      ${where}${wlbox}<div id="rulings" class="rul" data-sid="${esc(pr || "")}"></div>
       <div>${ownPill(k, true)} ${o ? `<span class="muted">${[...o.binders].map(([b, q]) => esc(b) + " ×" + q).join(", ")}</span>` : ""}</div>
       ${info && d && !/\bLand\b/.test(info.frontType) ? `<div class="muted" style="margin-top:6px">Counts as (for ${esc(d.name || d.slug)}):</div><div class="chips">${M.ROLE_KEYS.map((r) => `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="${r}" class="${effRoles(d, k).includes(r) ? "on" : softRole(d, k, r) ? "maybe" : ""}">${{ ramp: "Ramp", draw: "Card advantage", targeted: "Targeted", mass: "Mass" }[r]}</button>`).join("")}${d.roles && d.roles[k] ? `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="auto">Reset to auto</button>` : ""}</div>` : ""}
       <button class="btn" data-act="closezoom">Close</button></div></div>`;
@@ -664,7 +724,7 @@
     let h = `<div class="muted" style="margin:6px 0">${fl.length} of ${all.length} printings · ${qty} cards${f.binder ? ` · in <b>${esc(f.binder)}</b>` : ""}</div>`;
     if (!fl.length) return h + `<div class="card">Nothing matches those filters.</div>`;
     if (f.layout === "list") {
-      h += shown.map((e) => `<div class="cardrow" data-act="zoom" data-key="${esc(e.key)}" data-sid="${esc(e.sid)}" data-peek="${esc(e.key)}"><div class="t"><span class="n"><img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(e.sid) || M.artByName(e.name))}">${e.qty > 1 ? e.qty + "× " : ""}${esc(e.name)}</span><span class="muted">${esc(e.cost)}</span></div><div class="muted">${esc(e.type)} · ${esc(e.setName)} (${esc(e.set)}) #${esc(e.cn)}${e.rarity ? " · " + esc(e.rarity) : ""}${e.foil ? " · " + esc(e.foil) : ""}</div></div>`).join("");
+      h += shown.map((e) => `<div class="cardrow" data-act="zoom" data-key="${esc(e.key)}" data-sid="${esc(e.sid)}" data-peek="${esc(e.key)}"><div class="t"><span class="n"><img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(e.sid) || M.artByName(e.name))}">${e.qty > 1 ? e.qty + "× " : ""}${esc(e.name)}</span><span class="muted">${esc(e.cost)}</span></div><div class="muted">${esc(e.type)} · ${esc(e.setName)} (${esc(e.set)}) #${esc(e.cn)}${e.rarity ? " · " + esc(e.rarity) : ""}${e.foil ? " · " + esc(e.foil) : ""}${e.price != null ? " · $" + e.price.toFixed(2) : ""}</div></div>`).join("");
     } else {
       h += `<div class="colgrid">` + shown.map((e) => `<div class="ct" data-act="zoom" data-key="${esc(e.key)}" data-sid="${esc(e.sid)}" data-peek="${esc(e.key)}"><img loading="lazy" alt="${esc(e.name)}" src="${esc(M.artUrl(e.sid, "normal") || M.artByName(e.name, "normal"))}"${e.sid ? ` data-fb="${esc(M.artByName(e.name, "normal"))}"` : ""}>${e.qty > 1 ? `<span class="qty">${e.qty}×</span>` : ""}${e.foil ? `<span class="tag foil">${esc(e.foil)}</span>` : ""}</div>`).join("") + `</div>`;
     }
@@ -772,8 +832,8 @@
   function setResults(cl) {
     const v = S.sv, fl = setFiltered(cl), shown = fl.slice(0, v.limit);
     let h = `<div class="muted" style="margin:6px 0">${fl.length} shown</div>`;
-    if (v.layout === "list") h += shown.map((c) => `<div class="cardrow ${c.qty ? "" : "missing"}" data-act="zoom" data-key="${esc(c.key)}" data-sid="${esc(c.id)}"><div class="t"><span class="n">#${esc(c.cn)} ${esc(c.n)}</span><span class="muted">${c.qty ? "have " + c.qty : "missing"} · ${esc(c.r)}</span></div></div>`).join("");
-    else h += `<div class="colgrid">` + shown.map((c) => `<div class="ct ${c.qty ? "" : "missing"}" data-act="zoom" data-key="${esc(c.key)}" data-sid="${esc(c.id)}" data-peek="${esc(c.key)}"><img loading="lazy" alt="${esc(c.n)}" src="${esc(M.artUrl(c.id, "normal"))}">${c.qty > 1 ? `<span class="qty">${c.qty}×</span>` : ""}<span class="cnum">#${esc(c.cn)}</span></div>`).join("") + `</div>`;
+    if (v.layout === "list") h += shown.map((c) => `<div class="cardrow ${c.qty ? "" : "missing"}" data-act="zoom" data-key="${esc(c.key)}" data-sid="${esc(c.id)}" data-name="${esc(c.n)}"><div class="t"><span class="n">#${esc(c.cn)} ${esc(c.n)}</span><span class="muted">${c.qty ? "have " + c.qty : "missing"} · ${esc(c.r)}</span></div></div>`).join("");
+    else h += `<div class="colgrid">` + shown.map((c) => `<div class="ct ${c.qty ? "" : "missing"}" data-act="zoom" data-key="${esc(c.key)}" data-sid="${esc(c.id)}" data-name="${esc(c.n)}" data-peek="${esc(c.key)}"><img loading="lazy" alt="${esc(c.n)}" src="${esc(M.artUrl(c.id, "normal"))}">${c.qty > 1 ? `<span class="qty">${c.qty}×</span>` : ""}<span class="cnum">#${esc(c.cn)}</span></div>`).join("") + `</div>`;
     if (fl.length > shown.length) h += `<button class="btn" data-act="setmore">Show 200 more</button>`;
     return h;
   }
@@ -787,11 +847,11 @@
     if (f.view === "sets") return h + vSets();
     if (f.view === "binders") {
       const bs = M.binderSummary(S.rows);
-      h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders. Tap a binder to look inside.${S.csvName ? ` Collection updated ${esc(csvDate() || S.csvName)}.` : ""}</div></div>`;
+      h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders, worth about $${bs.reduce((s, b) => s + b.value, 0).toFixed(0)} AUD (the prices ManaBox holds). Tap a binder to look inside.${S.csvName ? ` Collection updated ${esc(csvDate() || S.csvName)}.` : ""}</div></div>`;
       const tile = (b) => {
         const dk = S.decks.find((d) => norm(d.name) === norm(b.name)), cmd = dk ? M.commandersOf(dk) : [];
         const img = cmd.length ? artImg(M.keyOf(S.idx, cmd[0]), cmd[0], dk, "art_crop", "tileimg") : b.sid ? `<img class="tileimg" loading="lazy" alt="" src="${esc(M.artUrl(b.sid))}">` : "";
-        return `<div class="tile" data-act="colbinder" data-b="${esc(b.name)}">${img}<div class="tilein"><b>${esc(b.name)}</b><div class="muted">${b.qty} cards · ${b.unique} different</div></div></div>`;
+        return `<div class="tile" data-act="colbinder" data-b="${esc(b.name)}">${img}<div class="tilein"><b>${esc(b.name)}</b><div class="muted">${b.qty} cards · ${b.unique} different${b.value ? " · $" + b.value.toFixed(0) : ""}</div></div></div>`;
       };
       const isDeck = (b) => /deck/i.test(b.btype), plainB = bs.filter((b) => !isDeck(b)), deckB = bs.filter(isDeck);
       h += `<h3>Collection binders (${plainB.length})</h3><div class="tiles">${plainB.map(tile).join("")}</div>`;
@@ -815,7 +875,7 @@
         <select data-cf="foil"><option value="">Foil or not</option><option value="foil" ${f.foil === "foil" ? "selected" : ""}>Foil only</option><option value="nonfoil" ${f.foil === "nonfoil" ? "selected" : ""}>Non-foil only</option></select></div>
         <div><button class="btn alt" data-act="colclear">Clear all filters</button></div></div>`;
     } else if (f.binder) h += `<div class="chips"><button class="on" data-act="colunbinder">Binder: ${esc(f.binder)} ✕</button></div>`;
-    h += `<div class="row"><span><select data-cf="sort">${[["name", "Name"], ["mv", "Mana value"], ["color", "Colour"], ["type", "Type"], ["set", "Set"], ["rarity", "Rarity"], ["qty", "Quantity"]].map(([v, t]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>Sort: ${t}</option>`).join("")}</select> <button class="btn alt" data-act="coldir">${f.dir > 0 ? "A→Z ↑" : "Z→A ↓"}</button></span>
+    h += `<div class="row"><span><select data-cf="sort">${[["name", "Name"], ["mv", "Mana value"], ["color", "Colour"], ["type", "Type"], ["set", "Set"], ["rarity", "Rarity"], ["qty", "Quantity"], ["price", "Price"]].map(([v, t]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>Sort: ${t}</option>`).join("")}</select> <button class="btn alt" data-act="coldir">${["name", "color", "type", "set"].includes(f.sort) ? (f.dir > 0 ? "A→Z ↑" : "Z→A ↓") : (f.dir > 0 ? "low→high ↑" : "high→low ↓")}</button></span>
       <span class="chips vt" style="margin:0"><button data-act="collayout" data-v="grid" class="${f.layout === "grid" ? "on" : ""}">Images</button><button data-act="collayout" data-v="list" class="${f.layout === "list" ? "on" : ""}">List</button></span></div>`;
     return h + `<div id="colres">${colResults()}</div>`;
   }
@@ -1056,6 +1116,17 @@
     else if (a === "setrar") { const s = S.sv.rar, r = el.dataset.v; if (s.has(r)) s.delete(r); else s.add(r); S.sv.limit = 200; render(); }
     else if (a === "setmore") { S.sv.limit += 200; const cl = setChecklist(S.sv.code, S.sv.mode); if (cl) $("#setres").innerHTML = setResults(cl); }
     else if (a === "setexport") { const cl = setChecklist(S.sv.code, S.sv.mode) || [], miss = cl.filter((c) => !c.qty); showOut(`Missing from ${S.sv.code.toUpperCase()} (${miss.length})`, miss.map((c) => `1 ${c.n} (${S.sv.code.toUpperCase()}) ${c.cn}`).join("\n"), `missing_${S.sv.code}.txt`); }
+    else if (a === "wladd") {
+      const sel = $("#wldeck"), slug = sel ? sel.value : "", nm = el.dataset.name;
+      S.saving = "Saving…"; render();
+      try { await addToWishlist(nm, slug, "Added in the app" + (S.who ? " by " + S.who : "")); S.saving = ""; recompute(); }
+      catch (e) { S.error = e.message; S.saving = ""; }
+      render();
+    }
+    else if (a === "upg") { S.upgOpen = !S.upgOpen; S.statsOpen = false; S.upgLimit = 25; render(); }
+    else if (a === "upgrole") { S.upgRole = el.dataset.r; S.upgLimit = 25; render(); }
+    else if (a === "upgmore") { S.upgLimit = (S.upgLimit || 25) + 25; render(); }
+    else if (a === "upgpick") { openModalNav(); S.ch = { mode: "out", slug: el.dataset.slug, i: null, q: "", pendIn: el.dataset.key }; render(); }
     else if (a === "colview") { CF().view = el.dataset.v; render(); }
     else if (a === "collayout") { CF().layout = el.dataset.v; CF().limit = 120; render(); }
     else if (a === "colfilters") { CF().open = !CF().open; render(); }
@@ -1066,7 +1137,7 @@
     else if (a === "colclear") { const f = CF(); Object.assign(f, { q: "", colors: new Set(), ci: new Set(), ciDeck: "", mv: new Set(), types: new Set(), rarity: new Set(), set: "", binder: "", foil: "", limit: 120 }); render(); }
     else if (a === "colchip") { const f = CF(), s = f[el.dataset.f], v = el.dataset.f === "mv" ? +el.dataset.v : el.dataset.v; if (s.has(v)) s.delete(v); else s.add(v); if (el.dataset.f === "ci") f.ciDeck = ""; f.limit = 120; render(); }
     else if (a === "dview") { S.dview = el.dataset.v; try { localStorage.setItem("mtg_dview", S.dview); } catch (e) { /* ignore */ } render(); }
-    else if (a === "zoom") { openModalNav(); S.zoom = { key: el.dataset.key, slug: el.dataset.slug, sid: el.dataset.sid || "" }; render(); }
+    else if (a === "zoom") { openModalNav(); S.zoom = { key: el.dataset.key, slug: el.dataset.slug, sid: el.dataset.sid || "", name: el.dataset.name || "" }; render(); }
     else if (a === "closezoom") { S.zoom = null; popNav("modal"); render(); }
     else if (a === "noop") { /* keep modal open */ }
     else if (a === "addswap") addSwap(el.dataset.slug);
@@ -1094,6 +1165,7 @@
     else if (a === "forget") { S.token = ""; try { localStorage.removeItem("mtg_token"); } catch (e) { /* ignore */ } S.decks = []; S.rows = []; S.csvName = ""; recompute(); status(); render(); }
   });
   document.addEventListener("input", (ev) => {
+    if (ev.target.id === "findq") { S.findq = ev.target.value; peekHide(); clearTimeout(S._findT); S._findT = setTimeout(() => { const r = $("#findres"); if (r) r.innerHTML = findResults(S.findq); }, 150); return; }
     if (ev.target.id === "setq") { S.sv.q = ev.target.value; S.sv.limit = 200; peekHide(); clearTimeout(S._setT); S._setT = setTimeout(() => { const cl = setChecklist(S.sv.code, S.sv.mode), r = $("#setres"); if (cl && r) r.innerHTML = setResults(cl); }, 150); return; }
     if (ev.target.id === "setfind") { S.sv.find = ev.target.value; clearTimeout(S._setT); S._setT = setTimeout(() => { render(); const i = $("#setfind"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 250); return; }
     if (ev.target.id === "colq") { CF().q = ev.target.value; CF().limit = 120; peekHide(); clearTimeout(S._colT); S._colT = setTimeout(() => { const r = $("#colres"); if (r) r.innerHTML = colResults(); }, 150); return; }
