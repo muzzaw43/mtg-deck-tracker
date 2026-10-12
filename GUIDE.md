@@ -149,7 +149,16 @@ Values are live Scryfall market prices (USD) converted to AUD. They load quietly
 ---
 
 ## Getting updates
-Your fork keeps working as it is. To receive improvements: on your fork's front page click **Sync fork → Update branch**. Because your settings live only in `site-config.js`, updates do not overwrite them. Then tap **⟳** in the app.
+**Automatic (recommended).** Your fork contains a small job, *Sync with upstream*, that checks once a day for improvements to the original app and brings them in. You switch it on once:
+1. In your fork open the **Actions** tab and click **I understand my workflows, go ahead and enable them**.
+2. Click **Sync with upstream** in the list, then **Run workflow** to try it. Green tick = working.
+After that it runs by itself. Updates appear in your app after a refresh (tap **⟳**). Your settings in `site-config.js`, and any edits you make yourself, win if they clash with an update. Your data repo is never touched.
+
+**Manual.** On your fork's front page click **Sync fork → Update branch** whenever you like.
+
+**If you want your own independent version** (no updates from the original), stop the sync: Actions tab → *Sync with upstream* → **⋯ → Disable workflow** (or set a repository variable `AUTO_SYNC` to `off` under Settings → Secrets and variables → Actions → Variables). You can then change anything you like. You can re-enable it later and pull updates again, though your own changes may then need merging by hand.
+
+GitHub pauses scheduled jobs in a repository nothing has happened in for about two months. If updates ever stop, open the Actions tab and re-enable it, or use the manual Sync button.
 
 ## Privacy
 - Your collection and decks live in your private repo only.
@@ -161,6 +170,7 @@ Your fork keeps working as it is. To receive improvements: on your fork's front 
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Automatic updates for forks:** a daily *Sync with upstream* job (opt out any time).
 - **Foil flag by hand and scan-in a deck list:** the scanner no longer tries to read foil; tap ★ on a card instead. New **Scan in a deck list** builds a deck list from scratch without touching your collection.
 - **Scanner reads the bottom-left small print first** (faster and exact), only reading the title when that isn't enough; steadier messages, and moving straight to the next card now counts it.
 - **Scanner feedback and close-confirm fix:** the scanner now says what it read, and names cards that aren't on the deck's list so you can tell it's working; the "Close the app?" prompt is armed on your first tap so Chrome can't skip it.

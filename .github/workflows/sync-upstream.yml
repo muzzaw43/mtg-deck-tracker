@@ -1,0 +1,35 @@
+# Keeps a fork up to date with the original app. It only runs in forks (never in the original repo).
+# Your settings (site-config.js) and any edits you make win if they clash with an update.
+# To stop automatic updates: Actions tab > "Sync with upstream" > ... > Disable workflow, or set a repository variable AUTO_SYNC = off.
+name: Sync with upstream
+on:
+  schedule:
+    - cron: "17 19 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+jobs:
+  sync:
+    if: github.repository != 'muzzaw43/mtg-deck-tracker' && vars.AUTO_SYNC != 'off'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge the latest from the original
+        run: |
+          git config user.name "sync-upstream"
+          git config user.email "sync-upstream@users.noreply.github.com"
+          git remote add upstream https://github.com/muzzaw43/mtg-deck-tracker.git
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then echo "Already up to date."; exit 0; fi
+          git merge --no-edit -X ours upstream/main
+          # GitHub does not let this job change workflow files, so keep your own copy of them.
+          git checkout ORIG_HEAD -- .github 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "Keep local workflows"
+          git push origin HEAD
+      - name: Rebuild the site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || true
