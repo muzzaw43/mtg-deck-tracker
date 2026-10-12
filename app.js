@@ -692,11 +692,17 @@
     } catch (e) { S.sv.err = "Couldn't load the set list (" + e.message + "). It needs an internet connection."; }
     S.sv.loading = ""; S._listBusy = false; render();
   }
+  // Memory first, then the copy remembered on this device (read synchronously so the first render already has it).
+  function getSetCards(code, mode) {
+    const ck = "mtg_set_" + code + "_" + mode;
+    if (S.setCache[ck]) return S.setCache[ck];
+    const c = lsGet(ck);
+    if (c && c.at && Date.now() - c.at < 3 * 864e5) { S.setCache[ck] = c.cards; return c.cards; }
+    return null;
+  }
   async function loadSetCards(code, mode) {
     const ck = "mtg_set_" + code + "_" + mode;
-    if (S.setCache[ck]) return;
-    const c = lsGet(ck);
-    if (c && c.at && Date.now() - c.at < 3 * 864e5) { S.setCache[ck] = c.cards; return; }
+    if (getSetCards(code, mode)) return;
     S.sv.loading = "Loading " + code.toUpperCase() + "…"; S.sv.err = ""; render();
     try {
       const q = encodeURIComponent("e:" + code), extra = mode === "prints" ? "&unique=prints&include_extras=true&include_variants=true" : "&unique=cards";
@@ -717,7 +723,7 @@
     return { names, prints, n: mine.length };
   }
   function setChecklist(code, mode) {
-    const cards = S.setCache["mtg_set_" + code + "_" + mode]; if (!cards) return null;
+    const cards = getSetCards(code, mode); if (!cards) return null;
     const own = setOwned(code);
     return cards.map((c) => { const key = M.keyOf(S.idx, c.n), qty = mode === "prints" ? (own.prints.get(c.cn.toLowerCase()) || 0) : (own.names.get(key) || 0); return { ...c, key, qty }; });
   }
@@ -736,7 +742,7 @@
       const rowHtml = (code, name, sub) => `<div class="cardrow" data-act="setopen" data-code="${esc(code)}"><div class="t"><span class="n">${esc(name)} <span class="muted">(${esc(code.toUpperCase())})</span></span><span class="muted">${esc(sub)}</span></div></div>`;
       h += `<h3>Sets you own cards from (${list.length})</h3><div id="setmine">` + (list.map((m) => rowHtml(m.code, m.name, `${m.names.size} different · ${m.qty} cards`)).join("") || `<div class="muted">No match.</div>`) + `</div>`;
       if (q) {
-        if (!S.setList) { loadSetList(); }
+        if (!S.setList) setTimeout(loadSetList, 0);
         const others = (S.setList || []).filter((s) => !mine.has(s.code) && (s.name.toLowerCase().includes(q) || s.code.includes(q))).slice(0, 40);
         h += `<h3>Other sets</h3>` + (S.setList ? (others.map((s) => rowHtml(s.code, s.name, `${s.n} cards · ${s.date.slice(0, 4)}`)).join("") || `<div class="muted">No match.</div>`) : `<div class="muted">Loading the set list…</div>`);
       }
@@ -747,7 +753,7 @@
       <div class="chips vt"><button data-act="setmode" data-v="cards" class="${v.mode === "cards" ? "on" : ""}">By card</button><button data-act="setmode" data-v="prints" class="${v.mode === "prints" ? "on" : ""}">Every printing</button></div>
       <div class="muted">${v.mode === "cards" ? "One entry per card. Counts as owned if you have any copy of it from this set." : "Every printing in the set, including variants. Matched on collector number."}</div>`;
     const cl = setChecklist(v.code, v.mode);
-    if (!cl) { if (!v.loading && !v.err) loadSetCards(v.code, v.mode); return h; }
+    if (!cl) { if (!v.loading && !v.err) setTimeout(() => loadSetCards(v.code, v.mode), 0); return h; }
     const have = cl.filter((c) => c.qty > 0).length, pct = cl.length ? Math.round((have / cl.length) * 100) : 0;
     const byR = (r) => { const t = cl.filter((c) => c.r === r); return t.length ? `${r} ${t.filter((c) => c.qty > 0).length}/${t.length}` : ""; };
     h += `<div class="card"><div class="row"><b>${have} of ${cl.length} cards</b><span class="muted">${pct}%</span></div><div class="bar"><i class="${pct === 100 ? "ok" : ""}" style="width:${pct}%"></i></div>
