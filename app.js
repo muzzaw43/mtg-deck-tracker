@@ -14,6 +14,13 @@
 
   /* ---------- phone back button: closes pop-ups, then leaves the deck ---------- */
   S.nav = []; S.ignorePop = 0;
+  async function forceRefresh() {
+    const files = ["./", "index.html", "style.css", "app.js", "logic.js", "manifest.json"];
+    try { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister())); } catch (e) { /* no SW */ }
+    try { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } catch (e) { /* no cache API */ }
+    try { await Promise.all(files.map((f) => fetch(f, { cache: "reload" }))); } catch (e) { /* offline */ }
+    location.reload();
+  }
   function pushNav(t) { try { history.pushState({ t }, ""); S.nav.push(t); } catch (e) { /* ignore */ } }
   function popNav(t) {
     if (S.nav[S.nav.length - 1] !== t) return;
@@ -26,8 +33,21 @@
     try { history.go(-n); } catch (e) { S.ignorePop--; }
   }
   const openModalNav = () => { if (!S.zoom && !S.ch) pushNav("modal"); };
+  // Exit guard: history is [root][guard]; Back from the guard lands on root, where we ask before leaving.
+  try {
+    const st = history.state || {};
+    if (!st.guard) { if (!st.root) history.replaceState({ root: 1 }, ""); history.pushState({ guard: 1 }, ""); }
+  } catch (e) { /* ignore */ }
   window.addEventListener("popstate", () => {
     if (S.ignorePop > 0) { S.ignorePop--; return; }
+    const st = history.state || {};
+    if (st.root && !S.nav.length) {
+      let leave = false;
+      try { leave = confirm("Close the app?"); } catch (e) { leave = true; }
+      if (leave) { S.leaving = true; try { history.back(); } catch (e) { /* ignore */ } }
+      else { try { history.pushState({ guard: 1 }, ""); } catch (e) { /* ignore */ } }
+      return;
+    }
     const t = S.nav.pop();
     if (t === "modal") { S.zoom = null; S.ch = null; }
     else if (t === "deck") S.deck = null;
@@ -966,6 +986,7 @@
   }, true);
   document.addEventListener("click", async (ev) => {
     if (Date.now() < S.noClickUntil) { ev.preventDefault(); ev.stopPropagation(); return; }
+    if (ev.target.closest && ev.target.closest("#refresh")) { forceRefresh(); return; }
     const tabBtn = ev.target.closest("#tabs button");
     if (tabBtn) { S.tab = tabBtn.dataset.tab; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
     const el = ev.target.closest("[data-act]");
