@@ -126,11 +126,15 @@ On a deck, tap **Upgrade finder**. It shows cards you already own, in the deck's
 On a deck, tap **Check deck** to sit down with the physical cards.
 - Choose what to check against: *as it is physically*, *the list in ManaBox*, or *with all confirmed swaps*.
 - Tap a card to tick it off; tap again to cycle back. Filters show what is left to find.
-- **Scan with camera** reads the card's name and the small print at the bottom (set code and collector number) and ticks the exact printing from your list. It warns if the card is the right name but a different printing. It cannot tell foil from normal, because the foil star is too small and OCR can't read it reliably; foil is taken from your list, and if a deck holds the same printing in both foil and normal it asks you which one you scanned. Hold the card in the frame with good light and steady hands. Foils and old cards (no set code) are the hardest; the name still works for those.
+- **Scan with camera** reads the small print at the bottom-left of the card (set code and collector number) and ticks the exact printing from your list. If that isn't readable (older cards, no set code) it reads the name instead. It warns if the card is the right name but a different printing. Hold the card flat and steady inside the frame, in good light.
+- **Foil is flagged by hand.** The foil star is too small for the camera to read, so the scanner ignores foil. Each card in the list has a **★** button: tap it to say "this one is foil" (tap again for normal). If that differs from the list, it's shown on the row and in the report.
 - A card that isn't on the deck's list is named with a "Note as extra" button. A line at the bottom shows the raw text it read, which helps if it can't match.
 - Extra cards found in the deck can be added to "not on the list". The result is a *missing and extra* report and a *list of what's physically here*.
 - This **never** adds anything to your ManaBox collection. Ticks are kept in your browser only.
 - The camera needs permission, and the first scan downloads a text-recognition library, so it needs internet that first time.
+
+### Scan in a deck list from scratch
+On the **Decks** tab, tap **Scan in a deck list**. Scan the cards of any physical deck and the app builds the list as you go (the same card twice adds a count; **Undo** removes a misread). Tap ★ on foils and use − and + to fix counts. It names cards from the small print using your collection, or from the title if the card isn't in your collection. It never adds anything to ManaBox or your collection. When you're done you can copy the list as text or CSV, or **Save as a deck** (needs the write token). Give it the same name as the ManaBox deck binder and it will read the real list from your CSV.
 
 ### Prices
 Values are live Scryfall market prices (USD) converted to AUD. They load quietly in the background; until then (or for cards with no market price) ManaBox's own price from your CSV is used. To show a different currency, change the exchange rate source in `app.js` (`loadLivePrices`) or ask for it to be made a setting.
@@ -157,7 +161,7 @@ Your fork keeps working as it is. To receive improvements: on your fork's front 
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
-- **Foil handling:** the scanner no longer guesses foil from the star; it ticks by set and number and asks only when a deck holds both a foil and a normal copy of the same printing.
+- **Foil flag by hand and scan-in a deck list:** the scanner no longer tries to read foil; tap ★ on a card instead. New **Scan in a deck list** builds a deck list from scratch without touching your collection.
 - **Scanner reads the bottom-left small print first** (faster and exact), only reading the title when that isn't enough; steadier messages, and moving straight to the next card now counts it.
 - **Scanner feedback and close-confirm fix:** the scanner now says what it read, and names cards that aren't on the deck's list so you can tell it's working; the "Close the app?" prompt is armed on your first tap so Chrome can't skip it.
 - **Check deck:** tick list for a physical deck plus a camera scanner that reads the name and the set/number line.

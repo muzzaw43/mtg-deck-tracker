@@ -507,11 +507,17 @@
     }
     return best && best.score >= 0.8 ? best : null;
   }
+  // Find the collection row for a set code + collector number (to name a card from its small print alone).
+  function indexBySetCn(rows) {
+    const m = new Map();
+    for (const r of rows || []) { if (!r.set || !r.cn) continue; const k = fixDigits(r.set) + "|" + cnNum(r.cn); if (!m.has(k)) m.set(k, r); }
+    return m;
+  }
   const fixDigits = (t) => String(t).toUpperCase().replace(/O/g, "0").replace(/[IL|]/g, "1");
   // Read set code, collector number and foil star from the OCR'd bottom-left text of a card.
   function parseCollector(text) {
     const up = String(text || "").toUpperCase();
-    const star = /[★☆✦]/.test(up); // only a real star glyph counts: OCR turns the bullet and specks into "*" all the time
+    const star = false; // foil is never read from the card (the star is too small for OCR); it is flagged by hand
     const flat = up.replace(/[^A-Z0-9★☆✦*\/•·.\- \n]/g, " ");
     let set = "", cn = "";
     const sm = flat.match(/\b([A-Z0-9]{3,5})\s*[•·.\-*★☆✦]+\s*(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/) || flat.match(/\b([A-Z0-9]{3,5})\s+(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/) || flat.match(/\b([A-Z0-9]{3,5})\s+\S{1,2}\s+(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/);
@@ -532,13 +538,9 @@
     // the bottom line alone is strong, but if the title clearly names a different deck card, don't trust it
     if (hits.length && tm) { const same = hits.filter((e) => e.key === tm.key); if (same.length) hits = same; else if (tm.score >= 0.9) hits = []; }
     if (hits.length) {
-      // The foil star can't be read reliably, so foil is only used to choose when the star is clearly there. If the deck holds both
-      // a foil and a normal copy of this printing and both are still to find, the app asks.
-      const open = hits.filter((e) => left(e) > 0);
-      let pick = cl.star ? open.find((e) => e.foil) : null;
-      const twin = !pick && open.length > 1 && open.some((e) => e.foil) && open.some((e) => !e.foil);
-      pick = pick || open[0] || hits[0];
-      return { kind: "exact", entry: pick, seen: cl, full: left(pick) <= 0, twin: twin ? open : null, foilNote: cl.star && !pick.foil ? "a foil star was read but the list says non-foil" : "" };
+      // Foil is not read from the card: the printing (set + number) is what's matched; foil is flagged by hand in the app.
+      const pick = hits.find((e) => left(e) > 0) || hits[0];
+      return { kind: "exact", entry: pick, seen: cl, full: left(pick) <= 0 };
     }
     if (tm) {
       const cands = entries.filter((e) => e.key === tm.key);
@@ -886,7 +888,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, tickEntries, matchTitle, matchAnyTitle, parseCollector, matchScan, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, tickEntries, matchTitle, matchAnyTitle, indexBySetCn, fixDigits, cnNum, parseCollector, matchScan, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;

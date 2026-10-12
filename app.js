@@ -72,6 +72,7 @@
     if (t === "modal") { S.zoom = null; S.ch = null; }
     else if (t === "deck") S.deck = null;
     else if (t === "tick") { S.tk = null; }
+    else if (t === "scanlist") { S.sc = null; }
     if (t === "modal" && scanEl) scanStop();
     render();
   });
@@ -381,6 +382,7 @@
   }
 
   function recompute() {
+    S.setIdx = null;
     if (!S.idx) { S.own = new Map(); S.checks = []; S.wlEval = []; return; }
     M.syncDeckLists(S.decks, S.rows);
     S.own = M.buildOwnership(S.rows, S.idx, S.cfg);
@@ -482,6 +484,7 @@
     }).join("");
   }
   function vDecks() {
+    if (S.sc) return vScanList();
     if (S.deck) return vDeck(deckBySlug(S.deck));
     if (!S.decks.length) return emptyMsg("No decks loaded yet.");
     const rq = reviewQueue();
@@ -489,7 +492,7 @@
     const stale = S.rows.length && (mm || (age != null && age >= 7)) ? `<div class="card lvl-warn">${mm ? `<b>${mm} swap${mm > 1 ? "s" : ""} made by hand ${mm > 1 ? "aren't" : "isn't"} in the collection file yet.</b> Update ManaBox, export it and upload the new CSV (Data tab). ` : ""}${age != null && age >= 7 ? `The collection file is ${age} days old.` : ""}</div>` : "";
     const findbox = `<input type="text" id="findq" placeholder="Where is a card? Search your decks and collection…" value="${esc(S.findq || "")}" autocomplete="off" style="width:100%;margin:6px 0"><div id="findres">${findResults(S.findq || "")}</div>`;
     const rbox = rq.length && S.reviewer ? `<div class="card"><b>Swaps to review (${rq.length})</b>${rq.map(({ d, p }) => `<div class="row" data-act="open" data-slug="${esc(d.slug)}" style="cursor:pointer"><span>${esc(d.name || d.slug)}: <b>${esc(p.in || "?")}</b>${p.out ? " for " + esc(p.out) : ""}<div class="muted">${esc(swapAuthor(p))}${(p.comments || []).length ? " — " + esc(p.comments[0].text) : ""}</div></span><span class="muted">open →</span></div>`).join("")}</div>` : "";
-    return stale + rbox + findbox + `<div class="tiles">` + S.decks.map((d) => {
+    return stale + rbox + `<button class="btn" data-act="scopen">Scan in a deck list</button>` + findbox + `<div class="tiles">` + S.decks.map((d) => {
       const m = M.deckMap(d, S.idx), tot = M.deckTotal(m), is = issuesFor(d.slug);
       const er = is.filter((i) => i.level === "error").length, wa = is.filter((i) => i.level === "warn").length;
       const act = M.activePencils(d), mm = new Map();
@@ -619,7 +622,7 @@
   /* ---------- check a physical deck (tick list + camera scanner) ---------- */
   const TK_MODES = { physical: "As it is physically (ManaBox + swaps made)", current: "List in ManaBox", swaps: "With all confirmed swaps" };
   const tkKey = (slug, mode) => "mtg_tick_" + slug + "_" + mode;
-  function tkLoad(slug, mode) { try { const j = JSON.parse(localStorage.getItem(tkKey(slug, mode)) || "null"); if (j && j.got) return j; } catch (e) { /* none */ } return { got: {}, diff: {}, extra: [], at: "" }; }
+  function tkLoad(slug, mode) { try { const j = JSON.parse(localStorage.getItem(tkKey(slug, mode)) || "null"); if (j && j.got) { j.pf = j.pf || {}; return j; } } catch (e) { /* none */ } return { got: {}, diff: {}, extra: [], pf: {}, at: "" }; }
   function tkSave() { const t = S.tk; if (!t) return; t.st.at = new Date().toISOString(); try { localStorage.setItem(tkKey(t.slug, t.mode), JSON.stringify(t.st)); } catch (e) { /* ignore */ } }
   function tkList(d, mode) {
     const l = mode === "swaps" ? M.applySwaps(d, S.idx, { only: ["approved", "made"] }) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
@@ -633,6 +636,7 @@
     S.tk = { slug: d.slug, mode, entries, st: tkLoad(d.slug, mode), filter: (S.tk && S.tk.filter) || "todo", msg: "" };
   }
   const tkGot = (e) => (S.tk.st.got[e.id] || 0);
+  const tkFoil = (e) => (e.id in S.tk.st.pf ? S.tk.st.pf[e.id] : e.foil);
   function tkTotals() { const t = S.tk; let have = 0, want = 0; for (const e of t.entries) { have += Math.min(e.qty, tkGot(e)); want += e.qty; } return { have, want }; }
   function vTick(d) {
     const t = S.tk, { have, want } = tkTotals(), pct = want ? Math.round((have / want) * 100) : 0;
@@ -655,8 +659,8 @@
         const n = tkGot(e), done = n >= e.qty, df = t.st.diff[e.id];
         const img = e.sid ? M.artUrl(e.sid, "art_crop") : M.artByName(e.name, "art_crop");
         return `<div class="cardrow tkrow ${done ? "done" : ""}" data-act="tkflip" data-id="${esc(e.id)}"><div class="t"><span class="n"><img class="thumb" loading="lazy" alt="" src="${esc(img)}">${esc(plain(e.name))}
-          <span class="muted tkp">${e.unknown ? "printing not known" : esc(e.set + " #" + e.cn) + (e.foil ? " · foil" : "")}${df ? ` · <b>found as ${esc(df.join(", "))}</b>` : ""}</span></span>
-          <span class="tkc ${done ? "ok" : ""}">${n}/${e.qty}</span></div></div>`;
+          <span class="muted tkp">${e.unknown ? "printing not known" : esc(e.set + " #" + e.cn)}${tkFoil(e) !== e.foil ? ` · <b>${tkFoil(e) ? "foil here, list says normal" : "normal here, list says foil"}</b>` : ""}${df ? ` · <b>found as ${esc(df.join(", "))}</b>` : ""}</span></span>
+          <span class="tkr"><button class="tkf ${tkFoil(e) ? "on" : ""}" data-act="tkfoil" data-id="${esc(e.id)}" title="Foil">★</button><span class="tkc ${done ? "ok" : ""}">${n}/${e.qty}</span></span></div></div>`;
       }).join("");
     }
     if (!show.length) h += `<div class="card muted">${t.filter === "todo" ? "Everything is ticked off." : "Nothing here."}</div>`;
@@ -670,7 +674,7 @@
     const t = S.tk, d = deckBySlug(t.slug), lines = [];
     const sw = (e) => `${e.name}${e.unknown ? "" : " (" + e.set + " #" + e.cn + (e.foil ? " foil" : "") + ")"}`;
     if (kind === "list") {
-      for (const e of t.entries) { const n = Math.min(e.qty, tkGot(e)); if (n > 0) lines.push(`${n} ${plain(e.name)}${e.unknown ? "" : " (" + e.set + ") " + e.cn}${e.foil ? " *F*" : ""}${t.st.diff[e.id] ? "  // found as " + t.st.diff[e.id].join(", ") : ""}`); }
+      for (const e of t.entries) { const n = Math.min(e.qty, tkGot(e)); if (n > 0) lines.push(`${n} ${plain(e.name)}${e.unknown ? "" : " (" + e.set + ") " + e.cn}${tkFoil(e) ? " *F*" : ""}${t.st.diff[e.id] ? "  // found as " + t.st.diff[e.id].join(", ") : ""}`); }
       for (const x of t.st.extra) lines.push(`1 ${x.name}  // not on the list${x.seen ? " — " + x.seen : ""}`);
       return lines.join("\n") + "\n";
     }
@@ -680,6 +684,8 @@
     lines.push(miss.length ? "MISSING:" : "Nothing missing.", ...miss.map((e) => `  ${e.qty - Math.min(e.qty, tkGot(e))}× ${sw(e)}`));
     const dif = t.entries.filter((e) => t.st.diff[e.id]);
     if (dif.length) lines.push("", "DIFFERENT PRINTING FROM THE LIST:", ...dif.map((e) => `  ${plain(e.name)}: list ${e.set} #${e.cn}${e.foil ? " foil" : ""}, found ${t.st.diff[e.id].join(", ")}`));
+    const fd = t.entries.filter((e) => tkGot(e) > 0 && tkFoil(e) !== e.foil);
+    if (fd.length) lines.push("", "FOIL DIFFERENCES:", ...fd.map((e) => `  ${plain(e.name)} (${e.set} #${e.cn}): list says ${e.foil ? "foil" : "normal"}, flagged ${tkFoil(e) ? "foil" : "normal"}`));
     if (t.st.extra.length) lines.push("", "IN THE DECK BUT NOT ON THE LIST:", ...t.st.extra.map((x) => `  ${x.name}${x.seen ? " (" + x.seen + ")" : ""}`));
     return lines.join("\n") + "\n";
   }
@@ -713,21 +719,75 @@
     scanMiss = 0; scanLockId = m.entry ? m.entry.id : "";
     scanHold = Date.now() + (m.kind === "diff" ? 12000 : 3000);
     scanLock = true; // one tick per card: the frame has to go blank or change before the next one counts
-    const e = m.entry, seen = m.seen.set && m.seen.cn ? `${m.seen.set} #${m.seen.cn}${m.seen.star ? " ★" : ""}` : "";
+    const e = m.entry, seen = m.seen.set && m.seen.cn ? `${m.seen.set} #${m.seen.cn}` : "";
     if (m.kind === "exact") {
       if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> (${esc(e.set)} #${esc(e.cn)}) — you already ticked all ${e.qty}. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="${esc(seen)}" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
-      if (m.twin) { S.scanTwin = m.twin.map((x) => x.id); scanMsg(`<b>${esc(plain(e.name))}</b> (${esc(e.set)} #${esc(e.cn)}): the deck has a foil and a normal copy. Which is this one?<div class="row">${m.twin.map((x) => `<button class="btn" data-act="scantwin" data-id="${esc(x.id)}">${x.foil ? "Foil" : "Normal"}</button>`).join("")}</div>`); scanHold = Date.now() + 12000; return; }
-      tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${esc(e.set)} #${esc(e.cn)}${e.foil ? " · list says foil" : ""}${m.foilNote ? " · " + esc(m.foilNote) : ""}</span>`);
+      tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${esc(e.set)} #${esc(e.cn)}</span>`);
     } else if (m.kind === "name") {
       if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> is already fully ticked. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
       tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">name matched; couldn't read the printing${e.unknown ? "" : " (list has " + esc(e.set) + " #" + esc(e.cn) + ")"}</span>`);
     } else if (m.kind === "diff") {
       S.scanPend = { id: e.id, seen, name: e.name };
-      scanMsg(`<b>${esc(plain(e.name))}</b>: this is <b>${esc(seen)}</b>${m.seen.star ? " (foil star)" : ""} but the list has <b>${esc(e.unknown ? "an unknown printing" : e.set + " #" + e.cn + (e.foil ? " foil" : ""))}</b>.<div class="row"><button class="btn" data-act="scanaccept">Count it</button><button class="btn alt" data-act="scanextra" data-seen="${esc(seen)}" data-name="${esc(e.name)}">It's an extra</button></div>`);
+      scanMsg(`<b>${esc(plain(e.name))}</b>: this is <b>${esc(seen)}</b> but the list has <b>${esc(e.unknown ? "an unknown printing" : e.set + " #" + e.cn)}</b>.<div class="row"><button class="btn" data-act="scanaccept">Count it</button><button class="btn alt" data-act="scanextra" data-seen="${esc(seen)}" data-name="${esc(e.name)}">It's an extra</button></div>`);
     }
   }
-  async function tkScan() {
+  /* ---------- scan in a deck list from scratch (nothing is added to the collection) ---------- */
+  const scLoad = () => { try { const j = JSON.parse(localStorage.getItem("mtg_scanlist") || "null"); if (j && j.cards) return j; } catch (e) { /* none */ } return { name: "", cmdr: "", cards: [] }; };
+  const scSave = () => { try { localStorage.setItem("mtg_scanlist", JSON.stringify(S.sc)); } catch (e) { /* ignore */ } };
+  const scTotal = () => S.sc.cards.reduce((n, c) => n + c.qty, 0);
+  function scAdd(name, set, cn) {
+    const id = norm(name) + "|" + (set || "").toUpperCase() + "|" + (cn || ""), ex = S.sc.cards.find((c) => c.id === id);
+    if (ex) ex.qty++; else S.sc.cards.push({ id, name, set: (set || "").toUpperCase(), cn: cn || "", foil: false, qty: 1 });
+    scSave(); render(); return id;
+  }
+  function vScanList() {
+    const L = S.sc, total = scTotal();
+    let h = `<div class="card"><div class="row"><b>Scan in a deck list</b><button class="btn alt" data-act="scback">Back</button></div>
+      <div class="muted">Scan the cards of a physical deck to build its list. This only makes a list here: nothing is added to your collection or ManaBox. Tap the star on a card that's foil; use − and + to fix counts.</div>
+      <div class="row" style="margin-top:8px"><b>${total} card${total === 1 ? "" : "s"}</b><span class="muted">${L.cards.length} different</span></div>
+      <div class="row" style="margin-top:8px"><button class="btn" data-act="scscan">Scan with camera</button><button class="btn alt" data-act="scclear">Clear list</button></div></div>`;
+    h += L.cards.slice().sort((a, b) => a.name.localeCompare(b.name)).map((c) => `<div class="cardrow tkrow"><div class="t"><span class="n">${esc(plain(c.name))}<span class="muted tkp">${c.set ? esc(c.set + " #" + c.cn) : "printing not read"}</span></span>
+      <span class="tkr"><button class="tkf ${c.foil ? "on" : ""}" data-act="scfoil" data-id="${esc(c.id)}" title="Foil">★</button><button class="tkf" data-act="scdec" data-id="${esc(c.id)}">−</button><span class="tkc">${c.qty}</span><button class="tkf" data-act="scinc" data-id="${esc(c.id)}">+</button></span></div></div>`).join("");
+    if (!L.cards.length) h += `<div class="card muted">Nothing scanned yet.</div>`;
+    h += `<div class="card"><b>Use the list</b><div class="row"><button class="btn" data-act="sctext">Text list</button><button class="btn alt" data-act="sccsv">CSV</button></div>
+      <div class="muted" style="margin-top:8px">Or save it as a deck in this app (needs the write token):</div>
+      <input type="text" id="scname" placeholder="Deck name (match the ManaBox deck binder name)" value="${esc(L.name)}" style="width:100%;margin:6px 0">
+      <input type="text" id="sccmd" placeholder="Commander" value="${esc(L.cmdr)}" style="width:100%;margin-bottom:6px">
+      <button class="btn" data-act="scsave" ${S.wtoken ? "" : "disabled"}>Save as a deck</button></div>`;
+    return h;
+  }
+  const scText = () => S.sc.cards.slice().sort((a, b) => a.name.localeCompare(b.name)).map((c) => `${c.qty} ${plain(c.name)}${c.set ? " (" + c.set + ") " + c.cn : ""}${c.foil ? " *F*" : ""}`).join("\n") + "\n";
+  const scCSV = () => ["Name,Set code,Collector number,Foil,Quantity", ...S.sc.cards.map((c) => [plain(c.name), c.set, c.cn, c.foil ? "foil" : "normal", c.qty].map((x) => /[",\n]/.test(String(x)) ? '"' + String(x).replace(/"/g, '""') + '"' : x).join(","))].join("\n") + "\n";
+  function scResolve(r) {
+    const cl = M.parseCollector(r.bottom), bySet = S.setIdx || (S.setIdx = M.indexBySetCn(S.rows));
+    let name = "", set = "", cn = "";
+    if (cl.set && cl.cn) { const row = bySet.get(M.fixDigits(cl.set) + "|" + M.cnNum(cl.cn)); if (row) { name = row.name; set = row.set; cn = row.cn; } }
+    if (!name && r.title) { const any = M.matchAnyTitle(S.idx, r.title); if (any) { name = (M.cardInfo(S.idx, any.key) || {}).name || any.key; if (cl.set && cl.cn) { set = cl.set; cn = cl.cn; } } }
+    return name ? { name, set, cn } : null;
+  }
+  function scListResult(r) {
+    if (!S.sc || !scanEl) return;
+    const c = scResolve(r);
+    if (!c) {
+      scanLast = { key: "", n: 0 }; if (++scanMiss >= 2) { scanLock = false; scanLockId = ""; }
+      if (Date.now() < scanHold) return;
+      const tt = (r.title || "").trim().split("\n")[0].trim(), bb = (r.bottom || "").trim().replace(/\s*\n\s*/g, " / ");
+      scanReads++;
+      scanMsg(`<span class="muted">Can't read that yet. Fill the frame with the card, flat and well lit.</span><div class="muted scanraw">Read #${scanReads}: title “${esc(tt) || "—"}” · small print “${esc(bb) || "—"}”</div>`);
+      return;
+    }
+    const id = norm(c.name) + "|" + c.set.toUpperCase() + "|" + c.cn;
+    if (scanLock) { if (id === scanLockId) { scanMiss = 0; return; } if (++scanMiss < 2) return; scanLock = false; scanLockId = ""; }
+    scanLast = scanLast.key === id ? { key: id, n: scanLast.n + 1 } : { key: id, n: 1 };
+    if (scanLast.n < 2) return;
+    scanMiss = 0; scanLock = true; scanLockId = id; scanHold = Date.now() + 3000;
+    const nid = scAdd(c.name, c.set, c.cn), have = S.sc.cards.find((x) => x.id === nid);
+    S.scLast = nid;
+    scanMsg(`<span class="scanok">✔ ${esc(plain(c.name))}</span> <span class="muted">${c.set ? esc(c.set.toUpperCase() + " #" + c.cn) : "printing not read"} · ${have ? have.qty : 1} in the list</span><div class="row"><button class="btn alt" data-act="scundo">Undo</button></div>`);
+  }
+  async function tkScan(mode) {
     if (scanEl) return;
+    S.scanMode = mode || "tick";
     scanEl = document.createElement("div"); scanEl.id = "scanpanel";
     scanEl.innerHTML = `<div class="scantop"><b id="scanprog"></b><button class="btn alt" data-act="scanstop">Done</button></div>
       <div class="scanwrap"><video id="scanv" playsinline muted></video><div class="scanframe"></div></div>
@@ -736,8 +796,8 @@
     scanEl.addEventListener("click", (ev) => {
       const b = ev.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act, t = S.tk;
       if (a === "scanstop") { scanStop(); popNav("modal"); }
+      else if (a === "scundo" && S.sc && S.scLast) { const c = S.sc.cards.find((x) => x.id === S.scLast); if (c) { c.qty--; if (c.qty <= 0) S.sc.cards = S.sc.cards.filter((x) => x !== c); scSave(); render(); scanMsg(`<span class="muted">Removed one ${esc(plain(c.name))}.</span>`); } S.scLast = ""; }
       else if (a === "scanaccept" && S.scanPend) { const e = t.entries.find((x) => x.id === S.scanPend.id); if (e) tkCount(e, S.scanPend.seen); scanMsg(`<span class="scanok">✔ counted ${esc(plain(S.scanPend.name))}</span> <span class="muted">as ${esc(S.scanPend.seen)}</span>`); S.scanPend = null; }
-      else if (a === "scantwin") { const e = t.entries.find((x) => x.id === b.dataset.id); if (e) { tkCount(e); scanHold = Date.now() + 2000; scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${e.foil ? "foil" : "normal"}</span>`); } }
       else if (a === "scanextra") { t.st.extra.push({ name: plain(b.dataset.name), seen: b.dataset.seen }); tkSave(); render(); scanMsg(`<span class="muted">Noted ${esc(plain(b.dataset.name))} as an extra.</span>`); }
     });
     try {
@@ -745,7 +805,7 @@
       const vid = $("#scanv"), fit = () => { const w = scanEl && scanEl.querySelector(".scanwrap"), fr = scanEl && scanEl.querySelector(".scanframe"); if (!w || !fr || !vid.videoWidth) return; const k = Math.min(w.clientWidth / vid.videoWidth, w.clientHeight / vid.videoHeight), c = window.MTGScan.cardRect(vid.videoWidth, vid.videoHeight); fr.style.height = c.h * k + "px"; fr.style.maxWidth = "none"; fr.style.width = c.w * k + "px"; };
       fit(); window.addEventListener("resize", fit); vid.addEventListener("loadedmetadata", fit);
       scanMsg(`<span class="muted">Hold a card inside the frame.</span>`);
-      window.MTGScan.loop($("#scanv"), (r) => { const p = $("#scanprog"); if (p) { const x = tkTotals(); p.textContent = `${x.have} of ${x.want} found`; } scanResult(r); }, (b) => S.tk && M.matchScan(S.tk.entries, S.tk.st, "", b).kind === "exact");
+      window.MTGScan.loop($("#scanv"), (r) => { const p = $("#scanprog"); if (S.scanMode === "list") { if (p) p.textContent = scTotal() + " cards"; scListResult(r); return; } if (p) { const x = tkTotals(); p.textContent = `${x.have} of ${x.want} found`; } scanResult(r); }, (b) => { if (S.scanMode === "list") { const cl = M.parseCollector(b); return !!(cl.set && cl.cn && (S.setIdx || (S.setIdx = M.indexBySetCn(S.rows))).get(M.fixDigits(cl.set) + "|" + M.cnNum(cl.cn))); } return S.tk && M.matchScan(S.tk.entries, S.tk.st, "", b).kind === "exact"; });
     } catch (e) { scanMsg(`<span class="err">${esc(e.name === "NotAllowedError" ? "Camera permission was refused. Allow it in the browser's site settings and try again." : e.message)}</span>`); }
   }
   function scanStop() { try { window.MTGScan.stop(); } catch (e) { /* ignore */ } if (scanEl) { scanEl.remove(); scanEl = null; } scanLast = { key: "", n: 0 }; scanLock = false; S.scanPend = null; render(); }
@@ -1250,7 +1310,7 @@
     if (Date.now() < S.noClickUntil) { ev.preventDefault(); ev.stopPropagation(); return; }
     if (ev.target.closest && ev.target.closest("#refresh")) { forceRefresh(); return; }
     const tabBtn = ev.target.closest("#tabs button");
-    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.tk = null; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
+    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.tk = null; S.sc = null; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
     const el = ev.target.closest("[data-act]");
     if (!el) return;
     const a = el.dataset.act;
@@ -1266,12 +1326,35 @@
     else if (a === "tkmode") { tkOpen(deckBySlug(S.tk.slug), el.dataset.m); render(); }
     else if (a === "tkfilter") { S.tk.filter = el.dataset.f; render(); }
     else if (a === "tkflip") { const e = S.tk.entries.find((x) => x.id === el.dataset.id); if (e) { const n = tkGot(e); S.tk.st.got[e.id] = n >= e.qty ? 0 : n + 1; if (!S.tk.st.got[e.id]) delete S.tk.st.diff[e.id]; tkSave(); render(); } }
-    else if (a === "tkreset") { if (confirm("Clear every tick for this check?")) { S.tk.st = { got: {}, diff: {}, extra: [], at: "" }; tkSave(); render(); } }
+    else if (a === "tkfoil") { const e = S.tk.entries.find((x) => x.id === el.dataset.id); if (e) { const nv = !tkFoil(e); if (nv === e.foil) delete S.tk.st.pf[e.id]; else S.tk.st.pf[e.id] = nv; tkSave(); render(); } }
+    else if (a === "tkreset") { if (confirm("Clear every tick for this check?")) { S.tk.st = { got: {}, diff: {}, extra: [], pf: {}, at: "" }; tkSave(); render(); } }
     else if (a === "tkxadd") { const v = ($("#tkx").value || "").trim(); if (v) { const k = M.keyOf(S.idx, v), nm = (M.cardInfo(S.idx, k) || {}).name || v; S.tk.st.extra.push({ name: nm, seen: "" }); tkSave(); render(); } }
     else if (a === "tkxdel") { S.tk.st.extra.splice(+el.dataset.i, 1); tkSave(); render(); }
     else if (a === "tkreport") showOut((deckBySlug(S.tk.slug).name || "") + " — check report", tkReport("report"), S.tk.slug + "_check.txt");
     else if (a === "tklist") showOut((deckBySlug(S.tk.slug).name || "") + " — what's physically here", tkReport("list"), S.tk.slug + "_physical.txt");
-    else if (a === "tkscan") tkScan();
+    else if (a === "tkscan") tkScan("tick");
+    else if (a === "scopen") { S.sc = scLoad(); S.deck = null; pushNav("scanlist"); render(); window.scrollTo(0, 0); }
+    else if (a === "scback") { S.sc = null; popNav("scanlist"); render(); }
+    else if (a === "scscan") tkScan("list");
+    else if (a === "scclear") { if (confirm("Clear the scanned list?")) { S.sc.cards = []; scSave(); render(); } }
+    else if (a === "scfoil") { const c = S.sc.cards.find((x) => x.id === el.dataset.id); if (c) { c.foil = !c.foil; scSave(); render(); } }
+    else if (a === "scinc") { const c = S.sc.cards.find((x) => x.id === el.dataset.id); if (c) { c.qty++; scSave(); render(); } }
+    else if (a === "scdec") { const c = S.sc.cards.find((x) => x.id === el.dataset.id); if (c) { c.qty--; if (c.qty <= 0) S.sc.cards = S.sc.cards.filter((x) => x !== c); scSave(); render(); } }
+    else if (a === "sctext") showOut("Scanned deck list", scText(), "scanned_deck.txt");
+    else if (a === "sccsv") showOut("Scanned deck list — CSV", scCSV(), "scanned_deck.csv");
+    else if (a === "scsave") {
+      const name = ($("#scname").value || "").trim(), cmdr = ($("#sccmd").value || "").trim(), slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      S.sc.name = name; S.sc.cmdr = cmdr; scSave();
+      if (!name || !slug) { S.error = "Give the deck a name first."; render(); return; }
+      if (deckBySlug(slug)) { S.error = `A deck called “${name}” already exists in the app. Pick another name.`; render(); return; }
+      S.error = ""; S.saving = "Saving the deck…"; render();
+      try {
+        const own = S.setIdx || (S.setIdx = M.indexBySetCn(S.rows)), cards = new Map();
+        for (const c of S.sc.cards) { const k = norm(c.name), e = cards.get(k) || { name: c.name, qty: 0 }; e.qty += c.qty; const row = c.set && own.get(M.fixDigits(c.set) + "|" + M.cnNum(c.cn)); if (row && row.sid && !e.sid) e.sid = row.sid; cards.set(k, e); }
+        await saveDeck({ slug, name, commander: cmdr || "", status: "built", cards: [...cards.values()], pencilled: [], wishlist: [] }, `New deck from scan: ${name}${S.who ? " [" + S.who + "]" : ""}`);
+        S.sc = null; popNav("scanlist"); S.saving = ""; await loadAll(); S.deck = slug; render();
+      } catch (e) { S.saving = ""; S.error = e.message; render(); }
+    }
     else if (a === "exportdeck") {
       const d = deckBySlug(el.dataset.slug);
       const mode = el.dataset.mode;
@@ -1372,6 +1455,8 @@
     else if (a === "forget") { S.token = ""; try { localStorage.removeItem("mtg_token"); } catch (e) { /* ignore */ } S.decks = []; S.rows = []; S.csvName = ""; recompute(); status(); render(); }
   });
   document.addEventListener("input", (ev) => {
+    if (ev.target.id === "scname" && S.sc) { S.sc.name = ev.target.value; scSave(); }
+    if (ev.target.id === "sccmd" && S.sc) { S.sc.cmdr = ev.target.value; scSave(); }
     if (ev.target.id === "findq") { S.findq = ev.target.value; peekHide(); clearTimeout(S._findT); S._findT = setTimeout(() => { const r = $("#findres"); if (r) r.innerHTML = findResults(S.findq); }, 150); return; }
     if (ev.target.id === "setq") { S.sv.q = ev.target.value; S.sv.limit = 200; peekHide(); clearTimeout(S._setT); S._setT = setTimeout(() => { const cl = setChecklist(S.sv.code, S.sv.mode), r = $("#setres"); if (cl && r) r.innerHTML = setResults(cl); }, 150); return; }
     if (ev.target.id === "setfind") { S.sv.find = ev.target.value; clearTimeout(S._setT); S._setT = setTimeout(() => { render(); const i = $("#setfind"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 250); return; }
