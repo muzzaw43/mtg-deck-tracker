@@ -690,7 +690,7 @@
     return lines.join("\n") + "\n";
   }
   // ----- camera scanner (overlay outside #view so re-renders don't kill the video) -----
-  let scanMiss = 0, scanLockId = "", scanHold = 0, scanReads = 0, scanEl = null, scanLast = { key: "", n: 0 }, scanLock = false, scanLog = [];
+  let scanNoMatch = 0, scanTapAt = 0, scanMiss = 0, scanLockId = "", scanHold = 0, scanReads = 0, scanEl = null, scanLast = { key: "", n: 0 }, scanLock = false, scanLog = [];
   function scanMsg(html) { const m = scanEl && scanEl.querySelector("#scanmsg"); if (m) m.innerHTML = html; }
   function tkCount(e, seenNote) {
     const t = S.tk; t.st.got[e.id] = Math.min(e.qty, tkGot(e) + 1);
@@ -725,12 +725,13 @@
     const key = m.kind === "none" ? "" : m.kind + "|" + (m.entry ? m.entry.id : "") + "|" + (m.seen.set || "") + (m.seen.cn || "");
     if (!key) {
       scanLast = { key: "", n: 0 }; if (++scanMiss >= 2) { scanLock = false; scanLockId = ""; }
-      if (Date.now() < scanHold) return;
+      if (Date.now() < scanHold) { if (!r.found || ++scanNoMatch < 4) return; }
+      scanHold = 0; scanNoMatch = 0;
       const tt = (r.title || "").trim().split("\n")[0].trim(), bb = (r.bottom || "").trim().replace(/\s*\n\s*/g, " / "), cl = m.seen;
       const any = tt ? M.matchAnyTitle(S.idx, tt) : null, nm = any ? (M.cardInfo(S.idx, any.key) || {}).name : "";
       scanReads++;
       const raw = `<div class="muted scanraw">Read #${scanReads}: title “${esc(tt) || "—"}” · small print “${esc(bb) || "—"}”${r.visual ? ` · picture match ${r.visual.score.toFixed(2)} (gap ${r.visual.margin.toFixed(2)})` : ""}</div>`;
-      if (nm) scanHold = Date.now() + 3000;
+      if (nm) scanHold = Infinity; scanNoMatch = 0;
       if (nm) scanMsg(`<b>${esc(plain(nm))}</b>${cl.set && cl.cn ? ` (${esc(cl.set)} #${esc(cl.cn)})` : ""} isn't on this deck's list.<div class="row"><button class="btn alt" data-act="scanextra" data-seen="${esc(cl.set && cl.cn ? cl.set + " #" + cl.cn : "")}" data-name="${esc(nm)}">Note as extra</button></div>${raw}`);
       else scanMsg(`<span class="muted">Can't match that yet. Fill the frame with the card, flat and well lit, name at the top and the small print at the bottom both inside it.</span>${raw}`);
       return;
@@ -741,12 +742,12 @@
     scanLast = scanLast.key === key ? { key, n: scanLast.n + 1 } : { key, n: 1 };
     if (scanLast.n < 2) return;
     scanMiss = 0; scanLockId = m.entry ? m.entry.id : "";
-    scanHold = Date.now() + 3000;
+    scanHold = Infinity; scanNoMatch = 0;
     scanLock = true; // one tick per card: the frame has to go blank or change before the next one counts
     const e = m.entry, seen = m.seen.set && m.seen.cn ? `${m.seen.set} #${m.seen.cn}` : "";
     if (m.kind === "exact") {
       if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> (${esc(e.set)} #${esc(e.cn)}) — you already ticked all ${e.qty}. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="${esc(seen)}" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
-      tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${esc(e.set)} #${esc(e.cn)}</span>`);
+      tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${esc(e.set)} #${esc(e.cn)} · ${tkGot(e)} of ${e.qty}</span>`);
       if (r.visual && r.visual.ok && !(r.bottom || "").trim()) S.refine = { key: r.visual.key, id: e.id, tries: 0, done: false };
     } else if (m.kind === "name") {
       if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> is already fully ticked. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
@@ -796,7 +797,8 @@
     const c = scResolve(r);
     if (!c) {
       scanLast = { key: "", n: 0 }; if (++scanMiss >= 2) { scanLock = false; scanLockId = ""; }
-      if (Date.now() < scanHold) return;
+      if (Date.now() < scanHold) { if (!r.found || ++scanNoMatch < 4) return; }
+      scanHold = 0; scanNoMatch = 0;
       const tt = (r.title || "").trim().split("\n")[0].trim(), bb = (r.bottom || "").trim().replace(/\s*\n\s*/g, " / ");
       scanReads++;
       scanMsg(`<span class="muted">Can't read that yet. Fill the frame with the card, flat and well lit.</span><div class="muted scanraw">Read #${scanReads}: title “${esc(tt) || "—"}” · small print “${esc(bb) || "—"}”</div>`);
@@ -807,7 +809,7 @@
     if (scanLock) { if (id === scanLockId) { scanMiss = 0; return; } if (++scanMiss < 2) return; scanLock = false; scanLockId = ""; }
     scanLast = scanLast.key === id ? { key: id, n: scanLast.n + 1 } : { key: id, n: 1 };
     if (scanLast.n < 2) return;
-    scanMiss = 0; scanLock = true; scanLockId = id; scanHold = Date.now() + 3000;
+    scanMiss = 0; scanLock = true; scanLockId = id; scanHold = Infinity; scanNoMatch = 0;
     const nid = scAdd(c.name, c.set, c.cn), have = S.sc.cards.find((x) => x.id === nid);
     S.scLast = nid;
     scanMsg(`<span class="scanok">✔ ${esc(plain(c.name))}</span> <span class="muted">${c.set ? esc(c.set.toUpperCase() + " #" + c.cn) : "printing not read"} · ${have ? have.qty : 1} in the list</span><div class="row"><button class="btn alt" data-act="scundo">Undo</button></div>`);
@@ -836,7 +838,9 @@
       <div id="scanmsg" class="scanmsg"><span class="muted">Starting the camera…</span></div>`;
     document.body.appendChild(scanEl); pushNav("modal");
     scanEl.addEventListener("click", (ev) => {
-      const b = ev.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act, t = S.tk;
+      const b = ev.target.closest("[data-act]");
+      if (!b) { if (ev.target.closest(".scanwrap")) { scanLock = false; scanLockId = ""; scanLast = { key: "", n: 0 }; scanMiss = 0; scanNoMatch = 0; S.refine = null; scanTapAt = Date.now(); const fd = $("#scanfound"); if (fd) fd.textContent = "◎ scanning again…"; } return; }
+      const a = b.dataset.act, t = S.tk;
       if (a === "scanstop") { scanStop(); popNav("modal"); }
       else if (a === "scundo" && S.sc && S.scLast) { const c = S.sc.cards.find((x) => x.id === S.scLast); if (c) { c.qty--; if (c.qty <= 0) S.sc.cards = S.sc.cards.filter((x) => x !== c); scSave(); render(); scanMsg(`<span class="muted">Removed one ${esc(plain(c.name))}.</span>`); } S.scLast = ""; }
       else if (a === "scanaccept" && S.scanPend) { const e = t.entries.find((x) => x.id === S.scanPend.id); if (e) tkCount(e, S.scanPend.seen); scanMsg(`<span class="scanok">✔ counted ${esc(plain(S.scanPend.name))}</span> <span class="muted">as ${esc(S.scanPend.seen)}</span>`); S.scanPend = null; }
@@ -846,12 +850,12 @@
       await window.MTGScan.start($("#scanv"), (m) => scanMsg(`<span class="muted">${esc(m)}</span>`));
       const vid = $("#scanv"), fit = () => { const w = scanEl && scanEl.querySelector(".scanwrap"), fr = scanEl && scanEl.querySelector(".scanframe"); if (!w || !fr || !vid.videoWidth) return; const k = Math.min(w.clientWidth / vid.videoWidth, w.clientHeight / vid.videoHeight), c = window.MTGScan.cardRect(vid.videoWidth, vid.videoHeight); fr.style.height = c.h * k + "px"; fr.style.maxWidth = "none"; fr.style.width = c.w * k + "px"; };
       fit(); window.addEventListener("resize", fit); vid.addEventListener("loadedmetadata", fit);
-      scanMsg(`<span class="muted">Hold a card inside the frame.</span>`);
+      scanMsg(`<span class="muted">Hold a card in view. Tap the screen to scan another copy of the same card.</span>`);
       if (S.scanMode === "tick" && S.tk) {
         window.MTGScan.setCandidates(S.tk.entries.map((e) => ({ id: e.id, key: e.key })), (v) => S.tk.entries.filter((e) => e.key === v.key).length === 1 && v.score >= 0.7 && !(S.refine && !S.refine.done && S.refine.key === v.key));
         window.MTGScan.setRefs(S.tk.entries.map((e) => ({ id: e.id, url: e.sid ? M.artUrl(e.sid, "small") : M.artByName(e.name, "small") })), () => { const fd = $("#scanfound"); if (fd && scanEl) fd.textContent = fd.textContent.replace(/ · (learning the deck|picture matching).*$/, "") + refNote(); });
       } else window.MTGScan.setCandidates(null);
-      window.MTGScan.loop($("#scanv"), (r) => { const p = $("#scanprog"), fd = $("#scanfound"); drawQuad(r.quad); if (fd) fd.textContent = (r.found ? "● card found" : "○ looking for the card") + refNote(); if (S.scanMode === "list") { if (p) p.textContent = scTotal() + " cards"; return scListResult(r); } if (p) { const x = tkTotals(); p.textContent = `${x.have} of ${x.want} found`; } return scanResult(r); }, (b) => { if (S.scanMode === "list") { const cl = M.parseCollector(b); return !!(cl.set && cl.cn && (S.setIdx || (S.setIdx = M.indexBySetCn(S.rows))).get(M.fixDigits(cl.set) + "|" + M.cnNum(cl.cn))); } return S.tk && M.matchScan(S.tk.entries, S.tk.st, "", b).kind === "exact"; });
+      window.MTGScan.loop($("#scanv"), (r) => { const p = $("#scanprog"), fd = $("#scanfound"); drawQuad(r.quad); if (fd) fd.textContent = (Date.now() - scanTapAt < 2500 ? "◎ scanning again…" : r.found ? "● card found" : "○ looking for the card") + refNote(); if (S.scanMode === "list") { if (p) p.textContent = scTotal() + " cards"; return scListResult(r); } if (p) { const x = tkTotals(); p.textContent = `${x.have} of ${x.want} found`; } return scanResult(r); }, (b) => { if (S.scanMode === "list") { const cl = M.parseCollector(b); return !!(cl.set && cl.cn && (S.setIdx || (S.setIdx = M.indexBySetCn(S.rows))).get(M.fixDigits(cl.set) + "|" + M.cnNum(cl.cn))); } return S.tk && M.matchScan(S.tk.entries, S.tk.st, "", b).kind === "exact"; });
     } catch (e) { scanMsg(`<span class="err">${esc(e.name === "NotAllowedError" ? "Camera permission was refused. Allow it in the browser's site settings and try again." : e.message)}</span>`); }
   }
   function scanStop() { try { window.MTGScan.stop(); } catch (e) { /* ignore */ } if (scanEl) { scanEl.remove(); scanEl = null; } scanLast = { key: "", n: 0 }; scanLock = false; S.scanPend = null; render(); }
