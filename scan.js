@@ -65,32 +65,45 @@
     return [bySum[0], byDiff[0], bySum[3], byDiff[3]];
   }
   function findQuad(src, sw, sh) {
-    const cv = window.cv, W = 320, k = W / sw, H = Math.round(sh * k), c = document.createElement("canvas"); c.width = W; c.height = H;
+    const cv = window.cv, W = 360, k = W / sw, H = Math.round(sh * k), c = document.createElement("canvas"); c.width = W; c.height = H;
     c.getContext("2d").drawImage(src, 0, 0, W, H);
-    const m = cv.imread(c), g = new cv.Mat(), e = new cv.Mat(), hi = new cv.Mat(), cs = new cv.MatVector(), ker = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+    const m = cv.imread(c), g = new cv.Mat(), ker = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
     let best = null, bestA = 0;
-    try {
-      cv.cvtColor(m, g, cv.COLOR_RGBA2GRAY); cv.GaussianBlur(g, g, new cv.Size(5, 5), 0); cv.Canny(g, e, 40, 120); cv.dilate(e, e, ker);
-      cv.findContours(e, cs, hi, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-      for (let i = 0; i < cs.size(); i++) {
-        const cn = cs.get(i), a = cv.contourArea(cn);
-        if (a > W * H * 0.12 && a > bestA) {
-          const hull = new cv.Mat(); cv.convexHull(cn, hull, false, true);
-          const per = cv.arcLength(hull, true);
-          for (const eps of [0.02, 0.03, 0.05]) {
-            const ap = new cv.Mat(); cv.approxPolyDP(hull, ap, eps * per, true);
-            if (ap.rows === 4) {
-              const pts = order([0, 1, 2, 3].map((j) => ({ x: ap.data32S[j * 2] / k, y: ap.data32S[j * 2 + 1] / k })));
-              const w = (dist(pts[0], pts[1]) + dist(pts[3], pts[2])) / 2, h = (dist(pts[0], pts[3]) + dist(pts[1], pts[2])) / 2, r = Math.min(w, h) / Math.max(w, h);
-              if (r > 0.58 && r < 0.84) { best = { pts, landscape: w > h }; bestA = a; ap.delete(); break; }
+    const tryEdges = (e) => {
+      const hi = new cv.Mat(), cs = new cv.MatVector();
+      try {
+        cv.findContours(e, cs, hi, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+        for (let i = 0; i < cs.size(); i++) {
+          const cn = cs.get(i), a = cv.contourArea(cn);
+          if (a > W * H * 0.08 && a < W * H * 0.97 && a > bestA) {
+            const hull = new cv.Mat(); cv.convexHull(cn, hull, false, true);
+            const per = cv.arcLength(hull, true), ha = cv.contourArea(hull);
+            for (const eps of [0.015, 0.025, 0.04, 0.06]) {
+              const ap = new cv.Mat(); cv.approxPolyDP(hull, ap, eps * per, true);
+              if (ap.rows === 4) {
+                const raw = [0, 1, 2, 3].map((j) => ({ x: ap.data32S[j * 2], y: ap.data32S[j * 2 + 1] })), pts = order(raw.map((p) => ({ x: p.x / k, y: p.y / k })));
+                const w1 = dist(pts[0], pts[1]), w2 = dist(pts[3], pts[2]), h1 = dist(pts[0], pts[3]), h2 = dist(pts[1], pts[2]);
+                const w = (w1 + w2) / 2, h = (h1 + h2) / 2, r = Math.min(w, h) / Math.max(w, h);
+                const sane = Math.max(w1, w2) / Math.min(w1, w2) < 1.7 && Math.max(h1, h2) / Math.min(h1, h2) < 1.7;
+                const edge = raw.some((p) => p.x <= 2 || p.y <= 2 || p.x >= W - 3 || p.y >= H - 3);
+                if (r > 0.45 && r < 0.95 && sane && !edge && a / ha > 0.8) { best = { pts, landscape: w > h }; bestA = a; ap.delete(); break; }
+              }
+              ap.delete();
             }
-            ap.delete();
+            hull.delete();
           }
-          hull.delete();
+          cn.delete();
         }
-        cn.delete();
+      } finally { hi.delete(); cs.delete(); }
+    };
+    try {
+      cv.cvtColor(m, g, cv.COLOR_RGBA2GRAY); cv.GaussianBlur(g, g, new cv.Size(5, 5), 0);
+      for (const [lo, hiT] of [[30, 90], [60, 160], [15, 50]]) {
+        const e = new cv.Mat(); cv.Canny(g, e, lo, hiT); cv.dilate(e, e, ker, new cv.Point(-1, -1), 2); cv.erode(e, e, ker, new cv.Point(-1, -1), 1);
+        tryEdges(e); e.delete();
+        if (best) break;
       }
-    } finally { m.delete(); g.delete(); e.delete(); hi.delete(); cs.delete(); ker.delete(); }
+    } finally { m.delete(); g.delete(); ker.delete(); }
     return best;
   }
   const OW = 720, OH = 1004;
@@ -108,6 +121,58 @@
     m.delete(); out.delete(); a.delete(); b.delete(); M.delete();
     return oc;
   }
+
+  /* ---- Image matching (like ManaBox): compare the straightened card with the deck's own card pictures ---- */
+  const DW = 48, DH = 67, refs = new Map(); // id -> Float32Array (normalised greyscale of the card face)
+  let refState = { total: 0, done: 0, failed: 0, busy: false, blocked: false };
+  function desc(src, flipped) {
+    const w = src.width || src.videoWidth, h = src.height || src.videoHeight;
+    const mid = document.createElement("canvas"); mid.width = DW * 2; mid.height = DH * 2;
+    const g1 = mid.getContext("2d"); g1.imageSmoothingQuality = "high";
+    g1.drawImage(src, w * 0.05, h * 0.035, w * 0.90, h * 0.93, 0, 0, mid.width, mid.height); // drop the rounded corners and border edge
+    const c = document.createElement("canvas"); c.width = DW; c.height = DH;
+    const g = c.getContext("2d", { willReadFrequently: true }); g.imageSmoothingQuality = "high"; g.drawImage(mid, 0, 0, DW, DH);
+    const d = g.getImageData(0, 0, DW, DH).data, n = DW * DH, o = new Float32Array(n);
+    let m = 0; for (let i = 0; i < n; i++) { o[i] = d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11; m += o[i]; }
+    m /= n; let v = 0; for (let i = 0; i < n; i++) { o[i] -= m; v += o[i] * o[i]; }
+    v = Math.sqrt(v) || 1; for (let i = 0; i < n; i++) o[i] /= v;
+    if (flipped) o.reverse();
+    return o;
+  }
+  const ncc = (a, b) => { let t = 0; for (let i = 0; i < a.length; i++) t += a[i] * b[i]; return t; };
+  function loadImg(url) {
+    return new Promise((res, rej) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onload = () => res(im); im.onerror = () => rej(new Error("img")); im.src = url; });
+  }
+  // items: [{id, url}]. Loads in the background; matching works with whatever has loaded so far.
+  async function setRefs(items, onProg) {
+    const todo = items.filter((x) => x.url && !refs.has(x.id));
+    refState = { total: items.length, done: items.length - todo.length, failed: 0, busy: true, blocked: false };
+    let i = 0;
+    const worker = async () => {
+      while (i < todo.length) {
+        const it = todo[i++];
+        try { const im = await loadImg(it.url); refs.set(it.id, desc(im, false)); }
+        catch (e) { refState.failed++; if (e && e.name === "SecurityError") refState.blocked = true; }
+        refState.done++; onProg && onProg(refState);
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+    refState.busy = false; onProg && onProg(refState);
+  }
+  function visualMatch(canvas, ids) {
+    if (!refs.size) return null;
+    const a = desc(canvas, false), b = desc(canvas, true);
+    let best = null, second = -1;
+    for (const id of ids) {
+      const r = refs.get(id); if (!r) continue;
+      const s1 = ncc(a, r), s2 = ncc(b, r), sc = Math.max(s1, s2), fl = s2 > s1;
+      if (!best || sc > best.score) { if (best) second = Math.max(second, best.score); best = { id, score: sc, flipped: fl }; } else if (sc > second) second = sc;
+    }
+    if (!best) return null;
+    best.margin = best.score - Math.max(second, 0);
+    best.ok = best.score >= 0.5 && best.margin >= 0.08;
+    return best;
+  }
   // Where the card sits in the frame: centred, ~72% of the frame height (or 92% of its width), card-shaped.
   function cardRect(w, h) {
     let ch = h * 0.72, cw = ch * RATIO;
@@ -115,11 +180,18 @@
     return { x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch, fx: (w - cw) / 2 / w, fy: (h - ch) / 2 / h, fw: cw / w, fh: ch / h };
   }
   // Bottom-left small print first (it identifies the exact printing); the title is only read when that wasn't enough.
+  let candIds = null; // ids of the cards worth matching (the deck's list)
   async function readFrame(src, w, h, enough) {
     const ws = await init();
-    let card = cardRect(w, h), img = src, found = false;
-    if (cvOK) { try { const q = findQuad(src, w, h); if (q) { img = warp(src, q); card = { x: 0, y: 0, w: OW, h: OH }; found = true; } } catch (e) { /* use the guide frame */ } }
-    const out = { title: "", bottom: "", found };
+    let card = cardRect(w, h), img = src, found = false, quad = null;
+    if (cvOK) { try { const q = findQuad(src, w, h); if (q) { img = warp(src, q); card = { x: 0, y: 0, w: OW, h: OH }; found = true; quad = q.pts; } } catch (e) { /* use the guide frame */ } }
+    const out = { title: "", bottom: "", found, quad, visual: null };
+    if (candIds && refs.size) {
+      let vimg = img;
+      if (!found) { vimg = document.createElement("canvas"); vimg.width = 360; vimg.height = Math.round(360 / RATIO); vimg.getContext("2d").drawImage(src, card.x, card.y, card.w, card.h, 0, 0, vimg.width, vimg.height); }
+      try { out.visual = visualMatch(vimg, candIds); } catch (e) { /* ignore */ }
+      if (out.visual && out.visual.ok) return out; // recognised by its picture: no need to read any text
+    }
     out.bottom = (await ws.bottom.recognize(strip(img, card, 0.03, 0.915, 0.60, 0.985, 900))).data.text;
     if (!enough || !enough(out.bottom)) out.title = (await ws.title.recognize(strip(img, card, 0.05, 0.035, 0.80, 0.105, 700))).data.text;
     return out;
@@ -141,5 +213,5 @@
     tick();
   }
   function stop() { running = false; if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; } }
-  window.MTGScan = { start, loop, stop, readFrame, cardRect, init, RATIO };
+  window.MTGScan = { setRefs, setCandidates: (ids) => { candIds = ids; }, refState: () => refState, start, loop, stop, readFrame, cardRect, init, RATIO };
 })();
