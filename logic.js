@@ -16,9 +16,9 @@
     branch: "main",
     dbUrl: "https://raw.githubusercontent.com/muzzaw43/mw-data/refs/heads/main/mtg_cards_slim.json",
     // Cards in these binders are free to use / trade.
-    freeBinders: ["Not in use", "edge of eternities"],
+    freeBinders: ["Not in use", "edge of eternities", "The Hobbit", "Avatar"],
     // Free only for cards held 2+ times in that binder (one copy stays put, rest are free).
-    multiCopyBinders: ["The Hobbit", "Avatar"],
+    multiCopyBinders: [],
     // Command Zone category template (baseline count check for a 99 + commander deck).
     template: { lands: 38, ramp: 10, draw: 12, targeted: 12, mass: 6, plan: 30 },
   };
