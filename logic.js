@@ -526,6 +526,16 @@
     if (nm) cn = nm[1];
     return { set, cn, star };
   }
+  // OCR often swaps one character (3/5, 1/7...). Among a card's listed printings, find one whose set and number are one character off the read.
+  function fuzzyEntry(cands, cl) {
+    if (!cl || !cl.set || !cl.cn) return null;
+    const hits = cands.filter((e) => {
+      if (!e.set || !e.cn) return false;
+      const ds = lev(fixDigits(e.set), fixDigits(cl.set)), dn = lev(cnNum(e.cn), cnNum(cl.cn));
+      return (ds === 0 && dn === 1) || (ds === 1 && dn === 0);
+    });
+    return hits.length === 1 ? hits[0] : null;
+  }
   const cnNum = (c) => String(c || "").replace(/^0+/, "").replace(/[^0-9].*$/, "");
   // Decide what a scanned card is. state = { got: {entryId: n} }. Returns {kind, entry?, seen?, why}.
   //  kind: exact (set+number match an expected printing) | name (title matched, printing not readable) | diff (title matched, printing read but not expected) | none
@@ -544,6 +554,8 @@
     }
     if (tm) {
       const cands = entries.filter((e) => e.key === tm.key);
+      const fz = fuzzyEntry(cands, cl);
+      if (fz) return { kind: "exact", entry: fz, seen: cl, full: left(fz) <= 0, fuzzy: true };
       if (cl.set && cl.cn) return { kind: "diff", entry: cands.find((e) => left(e) > 0) || cands[0], seen: cl, why: "different printing from the list" };
       const pick = cands.find((e) => left(e) > 0) || cands[0];
       return { kind: "name", entry: pick, seen: cl, full: left(pick) <= 0 };
@@ -888,7 +900,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, tickEntries, matchTitle, matchAnyTitle, indexBySetCn, fixDigits, cnNum, parseCollector, matchScan, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, tickEntries, matchTitle, matchAnyTitle, fuzzyEntry, lev, indexBySetCn, fixDigits, cnNum, parseCollector, matchScan, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;

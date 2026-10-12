@@ -142,3 +142,4 @@ tr.flag td{background:rgba(230,180,80,.16)}
 #exitbox{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center}.exitcard{background:var(--panel);color:var(--fg,inherit);padding:18px 22px;border-radius:12px;display:flex;flex-direction:column;gap:12px;min-width:220px;text-align:center}.exitcard .row{justify-content:center;gap:12px}
 .tkr{display:flex;align-items:center;gap:6px}.tkf{border:1px solid var(--line);background:none;color:var(--muted,#888);border-radius:8px;padding:6px 9px;font-size:16px;line-height:1}.tkf.on{background:#c9a227;color:#000;border-color:#c9a227}
 #scanov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.tkx{border:1px solid var(--line);background:none;border-radius:6px;padding:0 6px;margin-left:4px;font-size:12px}

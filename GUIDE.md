@@ -170,6 +170,7 @@ GitHub pauses scheduled jobs in a repository nothing has happened in for about t
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Corrections and sleeves:** a misread number one character off a listed printing (e.g. 257 for 237) is taken as the listed one, with a "No, it really is…" button; every result has **Wrong printing?** and every "found as…" note has a **✕**. Sleeved cards are matched with and without the sleeve margin, and if no outline is found it tries the guide frame at a few sizes and offsets. Dark sleeves on a dark surface are hardest: hold them against something light.
 - **Scanner keeps the last result on screen** until the next card needs attention, and **tapping the screen scans another copy of the same card** (like ManaBox).
 - **Different printings are fine:** the scanner recognises the card by name first, then reads the set/number to match the right printing, or counts it and notes "found as OTC #280" when it isn't the printing in the list.
 - **Scanner matches the card's picture** (like ManaBox): it learns the deck's card pictures from Scryfall, finds the card's outline even at an angle, straightens it and compares the picture, so most cards are recognised instantly without reading any text. Text reading is the fallback.

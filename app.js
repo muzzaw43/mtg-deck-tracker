@@ -659,7 +659,7 @@
         const n = tkGot(e), done = n >= e.qty, df = t.st.diff[e.id];
         const img = e.sid ? M.artUrl(e.sid, "art_crop") : M.artByName(e.name, "art_crop");
         return `<div class="cardrow tkrow ${done ? "done" : ""}" data-act="tkflip" data-id="${esc(e.id)}"><div class="t"><span class="n"><img class="thumb" loading="lazy" alt="" src="${esc(img)}">${esc(plain(e.name))}
-          <span class="muted tkp">${e.unknown ? "printing not known" : esc(e.set + " #" + e.cn)}${tkFoil(e) !== e.foil ? ` · <b>${tkFoil(e) ? "foil here, list says normal" : "normal here, list says foil"}</b>` : ""}${df ? ` · <b>found as ${esc(df.join(", "))}</b>` : ""}</span></span>
+          <span class="muted tkp">${e.unknown ? "printing not known" : esc(e.set + " #" + e.cn)}${tkFoil(e) !== e.foil ? ` · <b>${tkFoil(e) ? "foil here, list says normal" : "normal here, list says foil"}</b>` : ""}${df ? ` · <b>found as ${esc(df.join(", "))}</b> <button class="tkx" data-act="tkclrdiff" data-id="${esc(e.id)}" title="It is the listed printing">✕</button>` : ""}</span></span>
           <span class="tkr"><button class="tkf ${tkFoil(e) ? "on" : ""}" data-act="tkfoil" data-id="${esc(e.id)}" title="Foil">★</button><span class="tkc ${done ? "ok" : ""}">${n}/${e.qty}</span></span></div></div>`;
       }).join("");
     }
@@ -717,7 +717,9 @@
       const ents = t.entries.filter((e) => e.key === r.visual.key), left = (e) => e.qty - (t.st.got[e.id] || 0), cl = M.parseCollector(r.bottom || "");
       const hit = cl.set && cl.cn ? ents.find((e) => e.set && M.fixDigits(e.set) === M.fixDigits(cl.set) && M.cnNum(e.cn) === M.cnNum(cl.cn) && left(e) > 0) || ents.find((e) => e.set && M.fixDigits(e.set) === M.fixDigits(cl.set) && M.cnNum(e.cn) === M.cnNum(cl.cn)) : null;
       const open = ents.filter((e) => left(e) > 0).sort((a, b) => (r.visual.scores[b.id] || 0) - (r.visual.scores[a.id] || 0));
+      const fz = !hit && cl.set && cl.cn ? M.fuzzyEntry(ents, cl) : null;
       if (hit) m = { kind: "exact", entry: hit, seen: cl, full: left(hit) <= 0 };
+      else if (fz) m = { kind: "exact", entry: fz, seen: cl, full: left(fz) <= 0, fuzzy: true };
       else if (cl.set && cl.cn) m = { kind: "diff", entry: open[0] || ents[0], seen: cl, full: !open.length };
       else m = { kind: "exact", entry: open[0] || ents[0], seen: {}, full: !open.length };
     }
@@ -747,7 +749,9 @@
     const e = m.entry, seen = m.seen.set && m.seen.cn ? `${m.seen.set} #${m.seen.cn}` : "";
     if (m.kind === "exact") {
       if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> (${esc(e.set)} #${esc(e.cn)}) — you already ticked all ${e.qty}. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="${esc(seen)}" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
-      tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${esc(e.set)} #${esc(e.cn)} · ${tkGot(e)} of ${e.qty}</span>`);
+      tkCount(e);
+      if (m.fuzzy) { S.fix = { id: e.id, read: `${m.seen.set} #${m.seen.cn}` }; scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">read ${esc(S.fix.read)}, taken as the listed ${esc(e.set)} #${esc(e.cn)} · ${tkGot(e)} of ${e.qty}</span><div class="row"><button class="btn alt" data-act="scanasread">No, it really is ${esc(S.fix.read)}</button></div>`); }
+      else scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${esc(e.set)} #${esc(e.cn)} · ${tkGot(e)} of ${e.qty}</span><div class="row"><button class="btn alt" data-act="scanwrong" data-id="${esc(e.id)}">Wrong printing?</button></div>`);
       if (r.visual && r.visual.ok && !(r.bottom || "").trim()) S.refine = { key: r.visual.key, id: e.id, tries: 0, done: false };
     } else if (m.kind === "name") {
       if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> is already fully ticked. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
@@ -844,13 +848,17 @@
       if (a === "scanstop") { scanStop(); popNav("modal"); }
       else if (a === "scundo" && S.sc && S.scLast) { const c = S.sc.cards.find((x) => x.id === S.scLast); if (c) { c.qty--; if (c.qty <= 0) S.sc.cards = S.sc.cards.filter((x) => x !== c); scSave(); render(); scanMsg(`<span class="muted">Removed one ${esc(plain(c.name))}.</span>`); } S.scLast = ""; }
       else if (a === "scanaccept" && S.scanPend) { const e = t.entries.find((x) => x.id === S.scanPend.id); if (e) tkCount(e, S.scanPend.seen); scanMsg(`<span class="scanok">✔ counted ${esc(plain(S.scanPend.name))}</span> <span class="muted">as ${esc(S.scanPend.seen)}</span>`); S.scanPend = null; }
+      else if (a === "scanasread" && S.fix) { const a2 = t.st.diff[S.fix.id] || []; a2.push(S.fix.read); t.st.diff[S.fix.id] = a2; tkSave(); render(); scanMsg(`<span class="scanok">✔ noted as ${esc(S.fix.read)}</span>`); S.fix = null; }
+      else if (a === "scanwrong") { S.wrongFor = b.dataset.id; const e = t.entries.find((x) => x.id === b.dataset.id); const sib = t.entries.filter((x) => e && x.key === e.key && x.id !== e.id && (t.st.got[x.id] || 0) < x.qty); scanMsg(`<b>${esc(plain(e ? e.name : ""))}</b>: which is it?<div class="row">${sib.map((x) => `<button class="btn" data-act="scanmove" data-id="${esc(x.id)}">${esc(x.set + " #" + x.cn)}</button>`).join("")}<button class="btn alt" data-act="scanother">Something else</button></div>`); }
+      else if (a === "scanmove" && S.wrongFor) { const from = t.entries.find((x) => x.id === S.wrongFor), to = t.entries.find((x) => x.id === b.dataset.id); if (from && to) { t.st.got[from.id] = Math.max(0, (t.st.got[from.id] || 0) - 1); t.st.got[to.id] = (t.st.got[to.id] || 0) + 1; tkSave(); render(); scanMsg(`<span class="scanok">✔ moved to ${esc(to.set + " #" + to.cn)}</span>`); } S.wrongFor = null; }
+      else if (a === "scanother") { const e = t.entries.find((x) => x.id === S.wrongFor); scanMsg(`<span class="muted">Fix it on the list afterwards: tap ✕ next to “found as…” or untick the card.</span>`); S.wrongFor = null; }
       else if (a === "scanextra") { t.st.extra.push({ name: plain(b.dataset.name), seen: b.dataset.seen }); tkSave(); render(); scanMsg(`<span class="muted">Noted ${esc(plain(b.dataset.name))} as an extra.</span>`); }
     });
     try {
       await window.MTGScan.start($("#scanv"), (m) => scanMsg(`<span class="muted">${esc(m)}</span>`));
       const vid = $("#scanv"), fit = () => { const w = scanEl && scanEl.querySelector(".scanwrap"), fr = scanEl && scanEl.querySelector(".scanframe"); if (!w || !fr || !vid.videoWidth) return; const k = Math.min(w.clientWidth / vid.videoWidth, w.clientHeight / vid.videoHeight), c = window.MTGScan.cardRect(vid.videoWidth, vid.videoHeight); fr.style.height = c.h * k + "px"; fr.style.maxWidth = "none"; fr.style.width = c.w * k + "px"; };
       fit(); window.addEventListener("resize", fit); vid.addEventListener("loadedmetadata", fit);
-      scanMsg(`<span class="muted">Hold a card in view. Tap the screen to scan another copy of the same card.</span>`);
+      scanMsg(`<span class="muted">Hold a card in view. Tap the screen to scan another copy of the same card. Sleeved cards: hold them against something light.</span>`);
       if (S.scanMode === "tick" && S.tk) {
         window.MTGScan.setCandidates(S.tk.entries.map((e) => ({ id: e.id, key: e.key })), (v) => S.tk.entries.filter((e) => e.key === v.key).length === 1 && v.score >= 0.7 && !(S.refine && !S.refine.done && S.refine.key === v.key));
         window.MTGScan.setRefs(S.tk.entries.map((e) => ({ id: e.id, url: e.sid ? M.artUrl(e.sid, "small") : M.artByName(e.name, "small") })), () => { const fd = $("#scanfound"); if (fd && scanEl) fd.textContent = fd.textContent.replace(/ · (learning the deck|picture matching).*$/, "") + refNote(); });
@@ -1377,6 +1385,7 @@
     else if (a === "tkfilter") { S.tk.filter = el.dataset.f; render(); }
     else if (a === "tkflip") { const e = S.tk.entries.find((x) => x.id === el.dataset.id); if (e) { const n = tkGot(e); S.tk.st.got[e.id] = n >= e.qty ? 0 : n + 1; if (!S.tk.st.got[e.id]) delete S.tk.st.diff[e.id]; tkSave(); render(); } }
     else if (a === "tkfoil") { const e = S.tk.entries.find((x) => x.id === el.dataset.id); if (e) { const nv = !tkFoil(e); if (nv === e.foil) delete S.tk.st.pf[e.id]; else S.tk.st.pf[e.id] = nv; tkSave(); render(); } }
+    else if (a === "tkclrdiff") { delete S.tk.st.diff[el.dataset.id]; tkSave(); render(); }
     else if (a === "tkreset") { if (confirm("Clear every tick for this check?")) { S.tk.st = { got: {}, diff: {}, extra: [], pf: {}, at: "" }; tkSave(); render(); } }
     else if (a === "tkxadd") { const v = ($("#tkx").value || "").trim(); if (v) { const k = M.keyOf(S.idx, v), nm = (M.cardInfo(S.idx, k) || {}).name || v; S.tk.st.extra.push({ name: nm, seen: "" }); tkSave(); render(); } }
     else if (a === "tkxdel") { S.tk.st.extra.splice(+el.dataset.i, 1); tkSave(); render(); }

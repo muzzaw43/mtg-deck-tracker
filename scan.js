@@ -103,6 +103,17 @@
         tryEdges(e); e.delete();
         if (best) break;
       }
+      // Dark sleeves / dark cards: no clear edge, so try the whole card as a light-or-dark blob against its surroundings.
+      if (!best) {
+        const big = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
+        for (const inv of [false, true]) {
+          const t = new cv.Mat(); cv.threshold(g, t, 0, 255, (inv ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY) | cv.THRESH_OTSU);
+          cv.morphologyEx(t, t, cv.MORPH_CLOSE, big, new cv.Point(-1, -1), 2); cv.morphologyEx(t, t, cv.MORPH_OPEN, big, new cv.Point(-1, -1), 2);
+          tryEdges(t); t.delete();
+          if (best) break;
+        }
+        big.delete();
+      }
     } finally { m.delete(); g.delete(); ker.delete(); }
     return best;
   }
@@ -188,9 +199,27 @@
     if (cvOK) { try { const q = findQuad(src, w, h); if (q) { img = warp(src, q); card = { x: 0, y: 0, w: OW, h: OH }; found = true; quad = q.pts; } } catch (e) { /* use the guide frame */ } }
     const out = { title: "", bottom: "", found, quad, visual: null };
     if (candIds && refs.size) {
-      let vimg = img;
-      if (!found) { vimg = document.createElement("canvas"); vimg.width = 360; vimg.height = Math.round(360 / RATIO); vimg.getContext("2d").drawImage(src, card.x, card.y, card.w, card.h, 0, 0, vimg.width, vimg.height); }
-      try { out.visual = visualMatch(vimg, candIds); } catch (e) { /* ignore */ }
+      try {
+        if (found) { // the outline may be the sleeve rather than the card: try the whole thing and a version trimmed inwards
+          for (const mg of [0, 0.045]) {
+            const c2 = document.createElement("canvas"); c2.width = 240; c2.height = Math.round(240 / RATIO);
+            c2.getContext("2d").drawImage(img, OW * mg, OH * mg, OW * (1 - 2 * mg), OH * (1 - 2 * mg), 0, 0, c2.width, c2.height);
+            const v = visualMatch(c2, candIds);
+            if (v && (!out.visual || v.score > out.visual.score)) { out.visual = v; if (mg) card = { x: OW * mg, y: OH * mg, w: OW * (1 - 2 * mg), h: OH * (1 - 2 * mg) }; else card = { x: 0, y: 0, w: OW, h: OH }; }
+          }
+        }
+        if (!out.visual || !out.visual.ok) { // no outline, or it didn't look like a deck card: try the guide frame a little bigger, smaller and shifted
+          const g0 = cardRect(w, h), vc = document.createElement("canvas"), g2 = vc.getContext("2d"); vc.width = 160; vc.height = Math.round(160 / RATIO);
+          let bestG = null;
+          for (const sc of [0.88, 1, 1.12]) for (const dy of [-0.05, 0, 0.05]) for (const dx of [-0.05, 0, 0.05]) {
+            const cw = g0.w * sc, ch = g0.h * sc, cx = g0.x + g0.w / 2 + dx * g0.w - cw / 2, cy = g0.y + g0.h / 2 + dy * g0.h - ch / 2;
+            g2.drawImage(src, cx, cy, cw, ch, 0, 0, vc.width, vc.height);
+            const v = visualMatch(vc, candIds);
+            if (v && (!bestG || v.score > bestG.v.score)) bestG = { v, rect: { x: cx, y: cy, w: cw, h: ch } };
+          }
+          if (bestG && (!out.visual || bestG.v.score > out.visual.score)) { out.visual = bestG.v; img = src; card = bestG.rect; }
+        }
+      } catch (e) { /* ignore */ }
       if (out.visual && out.visual.ok && skipText && skipText(out.visual)) return out; // recognised by its picture: no text needed
     }
     out.bottom = (await ws.bottom.recognize(strip(img, card, 0.03, 0.915, 0.60, 0.985, 900))).data.text;
@@ -200,7 +229,7 @@
   }
   async function start(video, onStatus) {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("This browser can't open the camera here.");
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 2560 }, height: { ideal: 1440 } }, audio: false });
     video.srcObject = stream; video.setAttribute("playsinline", ""); video.muted = true; await video.play();
     await init(onStatus);
   }
