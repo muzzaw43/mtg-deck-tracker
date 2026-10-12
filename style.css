@@ -143,3 +143,5 @@ tr.flag td{background:rgba(230,180,80,.16)}
 .tkr{display:flex;align-items:center;gap:6px}.tkf{border:1px solid var(--line);background:none;color:var(--muted,#888);border-radius:8px;padding:6px 9px;font-size:16px;line-height:1}.tkf.on{background:#c9a227;color:#000;border-color:#c9a227}
 #scanov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .tkx{border:1px solid var(--line);background:none;border-radius:6px;padding:0 6px;margin-left:4px;font-size:12px}
+
+#scanhist{position:absolute;left:0;right:0;top:0;bottom:0;background:#111;color:#fff;overflow:auto;padding:14px;padding-top:max(14px,env(safe-area-inset-top));z-index:5}#scanhist[hidden]{display:none}.histrow{padding:6px 0;border-bottom:1px solid #333;align-items:center}
