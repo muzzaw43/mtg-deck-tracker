@@ -363,7 +363,15 @@
 
   /* ---------- Trades ---------- */
   const RARS = ["common", "uncommon", "rare", "mythic"];
-  const rowAUD = (r) => { const v = parseFloat(r.price); return isFinite(v) && v >= 0 && (!r.cur || /^AUD$/i.test(r.cur)) && String(r.price).trim() !== "" ? v : null; };
+  let LIVE = null; // { rate, p: { scryfallId: [usd, usd_foil, usd_etched] } }
+  const setLive = (l) => { LIVE = l; };
+  const liveAUD = (r) => {
+    if (!LIVE || !r.sid || !LIVE.p[r.sid]) return null;
+    const [n, f, e] = LIVE.p[r.sid], foil = String(r.foil || "").toLowerCase(), want = foil === "etched" ? e : foil === "foil" ? f : n;
+    const v = want != null ? want : (n != null ? n : f != null ? f : e);
+    return v == null ? null : v * LIVE.rate;
+  };
+  const rowAUD = (r) => { const lv = liveAUD(r); if (lv != null) return lv; const v = parseFloat(r.price); return isFinite(v) && v >= 0 && (!r.cur || /^AUD$/i.test(r.cur)) && String(r.price).trim() !== "" ? v : null; };
   function buildTrades(ctx, reserve) {
     const { own, claims, cfg, idx } = ctx;
     const free = new Set(cfg.freeBinders.map(norm));
@@ -783,7 +791,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;

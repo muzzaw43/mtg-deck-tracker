@@ -110,10 +110,34 @@
       if (S.decks.length && S.tab === "data") S.tab = "decks";
     } catch (e) { S.error = e.message; }
     S.busy = ""; try { recompute(); } catch (e) { S.error = "Loaded, but processing failed: " + e.message; } status(); render();
+    if (S.rows.length) setTimeout(loadLivePrices, 800);
   }
 
   /* ---------- saving (needs a write token) ---------- */
   const b64 = (str) => { const by = new TextEncoder().encode(str); let bin = ""; by.forEach((c) => { bin += String.fromCharCode(c); }); return btoa(bin); };
+  // Live market prices (Scryfall, USD) converted to AUD. Loads quietly in the background and is cached for a day; until then ManaBox's own prices show.
+  async function loadLivePrices() {
+    try {
+      const sids = [...new Set(S.rows.map((r) => r.sid).filter(Boolean))];
+      if (!sids.length) return;
+      let c = null; try { c = JSON.parse(localStorage.getItem("mtg_px") || "null"); } catch (e) {}
+      const fresh = c && Date.now() - c.t < 864e5;
+      if (c && c.p) { M.setLive({ rate: c.rate, p: c.p }); S.live = { at: c.t, partial: !fresh }; if (S.tab !== "data" && !document.activeElement.matches("input,textarea,select")) render(); }
+      if (fresh && sids.every((x) => c.p[x])) return;
+      let rate = c && c.rate || 1.5;
+      try { const fr = await fetch("https://api.frankfurter.app/latest?from=USD&to=AUD"); if (fr.ok) { const j = await fr.json(); if (j.rates && j.rates.AUD) rate = j.rates.AUD; } } catch (e) {}
+      const p = Object.assign({}, c && c.p), need = sids.filter((x) => !(fresh && p[x]));
+      for (let i = 0; i < need.length; i += 75) {
+        const r = await fetch("https://api.scryfall.com/cards/collection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifiers: need.slice(i, i + 75).map((id) => ({ id })) }) });
+        if (!r.ok) break;
+        for (const cd of (await r.json()).data || []) { const q = cd.prices || {}, f = (x) => (x == null ? null : parseFloat(x)); p[cd.id] = [f(q.usd), f(q.usd_foil), f(q.usd_etched)]; }
+        await new Promise((res) => setTimeout(res, 120));
+      }
+      try { localStorage.setItem("mtg_px", JSON.stringify({ t: Date.now(), rate, p })); } catch (e) {}
+      M.setLive({ rate, p }); S.live = { at: Date.now(), rate };
+      if (!document.querySelector(".modal") && S.tab !== "data" && !document.activeElement.matches("input,textarea,select")) render();
+    } catch (e) { /* stay on ManaBox prices */ }
+  }
   async function addToWishlist(name, slug, note) {
     if (!S.wtoken) throw new Error("Saving needs a write token — add it in Data.");
     const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/wishlist.json`, hd = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
@@ -545,12 +569,28 @@
     let h = `<div class="card"><div class="row"><b>Upgrade finder</b><button class="btn alt" data-act="upg">Close</button></div>
       <div class="muted">Cards you own, in this deck's colours, not already in it and not locked in another built deck, that fill a role. It only suggests: pick one, then choose the card to cut, and it's added as a pencilled swap. Roles are guessed from card text.</div>
       <div class="chips vt">${M.GAP_ROLES.map((r) => `<button data-act="upgrole" data-r="${r}" class="${role === r ? "on" : ""}">${lab[r]} ${u.gaps[r] ? `<span class="pill err">short ${u.gaps[r]}</span>` : `<span class="muted">at target</span>`} · ${u.lists[r].length}</button>`).join("")}</div>`;
-    const list = u.lists[role], lim = S.upgLimit || 25;
-    h += list.slice(0, lim).map((c) => `<div class="card"><div class="row"><b>${esc(plain(c.name))}</b><span class="muted">${esc(c.info.cost)}</span></div>
-      <div class="muted">${esc(c.info.type)}${c.roles.length > 1 ? " · also " + c.roles.filter((r) => r !== role).map((r) => lab[r]).join(", ") : ""}</div>
-      <div class="oracle">${esc(c.info.text)}</div>
-      <div class="muted">${c.free ? `${c.free} in free binders` : "not in a free binder"}: ${esc(c.binders.map((b) => b.binder + " ×" + b.qty).join(", "))}${c.soft ? " · wanted by a planned/pencilled deck" : ""}${c.illegal ? " · DB flags it not Commander-legal (flag can be wrong)" : ""}</div>
-      <button class="btn" data-act="zoom" data-key="${esc(c.key)}" data-slug="${esc(d.slug)}">View</button>${S.wtoken ? `<button class="btn alt" data-act="upgpick" data-slug="${esc(d.slug)}" data-key="${esc(c.key)}">Pencil in…</button>` : ""}</div>`).join("") || `<div class="muted">Nothing owned fits here.</div>`;
+    const list = u.lists[role], lim = S.upgLimit || 24;
+    const why = {
+      ramp: "Ramp gets you to your big plays sooner, which helps in 1v1 and in a slow pod alike.",
+      draw: "Card advantage keeps your hand full in long pod games and wins the grind 1v1.",
+      targeted: "Targeted removal answers the one threat that matters 1v1, and in a pod you save it for the biggest problem.",
+      mass: "A sweeper is your reset button when you're behind on board, especially against a pod's combined board.",
+    };
+    const reason = (c) => {
+      const bits = [`<b>Why:</b> ${lab[role]} — the deck has ${st.counts[role] || 0} against a target of ${st.targets[role] || 0}${u.gaps[role] ? ` (short ${u.gaps[role]})` : " (already at target, so this would be an upgrade over a weaker one)"}.`];
+      const extra = c.roles.filter((r) => r !== role && u.gaps[r] > 0);
+      if (extra.length) bits.push(`Also helps with ${extra.map((r) => lab[r].toLowerCase() + " (short " + u.gaps[r] + ")").join(", ")}.`);
+      bits.push(why[role]);
+      bits.push(c.free ? `You have ${c.free} in free binders, so nothing is taken from another deck.` : `It's not in a free binder (${c.binders.map((b) => b.binder).join(", ")}), but no built deck is using it.`);
+      if (c.soft) bits.push("A planned or pencilled deck also wants it.");
+      if (c.illegal) bits.push("The card database flags it as not Commander-legal (that flag can be wrong).");
+      return bits.join(" ");
+    };
+    h += `<div class="stacks">` + list.slice(0, lim).map((c) => `<div class="stack upc">
+      <div data-hold class="ac full" data-act="zoom" data-key="${esc(c.key)}" data-slug="${esc(d.slug)}">${artImg(c.key, c.name, d, "normal", "acimg")}</div>
+      <div class="muted upwhy">${reason(c)}</div>
+      ${S.wtoken ? `<button class="btn alt" data-act="upgpick" data-slug="${esc(d.slug)}" data-key="${esc(c.key)}">Pencil in…</button>` : ""}</div>`).join("") + `</div>` || `<div class="muted">Nothing owned fits here.</div>`;
+    if (!list.length) h += `<div class="muted">Nothing owned fits here.</div>`;
     if (list.length > lim) h += `<button class="btn" data-act="upgmore">Show more</button>`;
     return h + `</div>`;
   }
@@ -847,7 +887,7 @@
     if (f.view === "sets") return h + vSets();
     if (f.view === "binders") {
       const bs = M.binderSummary(S.rows);
-      h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders, worth about $${bs.reduce((s, b) => s + b.value, 0).toFixed(0)} AUD (the prices ManaBox holds). Tap a binder to look inside.${S.csvName ? ` Collection updated ${esc(csvDate() || S.csvName)}.` : ""}</div></div>`;
+      h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders, worth about $${bs.reduce((s, b) => s + b.value, 0).toFixed(0)} AUD (${S.live ? "live market prices from Scryfall, converted to AUD" : "the prices ManaBox holds, until live prices load"}). Tap a binder to look inside.${S.csvName ? ` Collection updated ${esc(csvDate() || S.csvName)}.` : ""}</div></div>`;
       const tile = (b) => {
         const dk = S.decks.find((d) => norm(d.name) === norm(b.name)), cmd = dk ? M.commandersOf(dk) : [];
         const img = cmd.length ? artImg(M.keyOf(S.idx, cmd[0]), cmd[0], dk, "art_crop", "tileimg") : b.sid ? `<img class="tileimg" loading="lazy" alt="" src="${esc(M.artUrl(b.sid))}">` : "";
