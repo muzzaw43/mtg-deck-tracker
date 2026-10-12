@@ -692,7 +692,21 @@
   // ----- camera scanner (overlay outside #view so re-renders don't kill the video) -----
   let scanNoMatch = 0, scanTapAt = 0, scanMiss = 0, scanLockId = "", scanHold = 0, scanReads = 0, scanEl = null, scanLast = { key: "", n: 0 }, scanLock = false, scanLog = [];
   function scanMsg(html) { const m = scanEl && scanEl.querySelector("#scanmsg"); if (m) m.innerHTML = html; }
+  // A short "ding" for each counted card (made with the browser's audio, no sound file). The bell in the scanner bar mutes it.
+  let audioCtx = null;
+  function dingReady() { try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === "suspended") audioCtx.resume(); } catch (e) { /* no audio */ } }
+  function ding() {
+    try { if (navigator.vibrate) navigator.vibrate(25); } catch (e) { /* ignore */ }
+    if (localStorage.getItem("mtg_mute") === "1" || !audioCtx) return;
+    try {
+      const t = audioCtx.currentTime, o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = "sine"; o.frequency.setValueAtTime(988, t); o.frequency.setValueAtTime(1319, t + 0.09);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t + 0.4);
+    } catch (e) { /* ignore */ }
+  }
   function tkCount(e, seenNote) {
+    ding();
     const t = S.tk; t.st.got[e.id] = Math.min(e.qty, tkGot(e) + 1);
     if (seenNote) { const a = t.st.diff[e.id] || []; if (!a.includes(seenNote)) a.push(seenNote); t.st.diff[e.id] = a; }
     tkSave(); render();
@@ -767,6 +781,7 @@
   const scTotal = () => S.sc.cards.reduce((n, c) => n + c.qty, 0);
   function scAdd(name, set, cn) {
     const id = norm(name) + "|" + (set || "").toUpperCase() + "|" + (cn || ""), ex = S.sc.cards.find((c) => c.id === id);
+    ding();
     if (ex) ex.qty++; else S.sc.cards.push({ id, name, set: (set || "").toUpperCase(), cn: cn || "", foil: false, qty: 1 });
     scSave(); render(); return id;
   }
@@ -835,9 +850,9 @@
   }
   async function tkScan(mode) {
     if (scanEl) return;
-    S.scanMode = mode || "tick";
+    S.scanMode = mode || "tick"; dingReady();
     scanEl = document.createElement("div"); scanEl.id = "scanpanel";
-    scanEl.innerHTML = `<div class="scantop"><b id="scanprog"></b><span id="scanfound" class="muted"></span><button class="btn alt" data-act="scanstop">Done</button></div>
+    scanEl.innerHTML = `<div class="scantop"><b id="scanprog"></b><button class="btn alt" data-act="scanmute" id="scanmute">${(() => { try { return localStorage.getItem("mtg_mute") === "1" ? "🔕" : "🔔"; } catch (e) { return "🔔"; } })()}</button><span id="scanfound" class="muted"></span><button class="btn alt" data-act="scanstop">Done</button></div>
       <div class="scanwrap"><video id="scanv" playsinline muted></video><canvas id="scanov"></canvas><div class="scanframe"></div></div>
       <div id="scanmsg" class="scanmsg"><span class="muted">Starting the camera…</span></div>`;
     document.body.appendChild(scanEl); pushNav("modal");
@@ -848,6 +863,7 @@
       if (a === "scanstop") { scanStop(); popNav("modal"); }
       else if (a === "scundo" && S.sc && S.scLast) { const c = S.sc.cards.find((x) => x.id === S.scLast); if (c) { c.qty--; if (c.qty <= 0) S.sc.cards = S.sc.cards.filter((x) => x !== c); scSave(); render(); scanMsg(`<span class="muted">Removed one ${esc(plain(c.name))}.</span>`); } S.scLast = ""; }
       else if (a === "scanaccept" && S.scanPend) { const e = t.entries.find((x) => x.id === S.scanPend.id); if (e) tkCount(e, S.scanPend.seen); scanMsg(`<span class="scanok">✔ counted ${esc(plain(S.scanPend.name))}</span> <span class="muted">as ${esc(S.scanPend.seen)}</span>`); S.scanPend = null; }
+      else if (a === "scanmute") { let m = false; try { m = localStorage.getItem("mtg_mute") === "1"; localStorage.setItem("mtg_mute", m ? "0" : "1"); } catch (e) { /* ignore */ } b.textContent = m ? "🔔" : "🔕"; if (m) ding(); }
       else if (a === "scanasread" && S.fix) { const a2 = t.st.diff[S.fix.id] || []; a2.push(S.fix.read); t.st.diff[S.fix.id] = a2; tkSave(); render(); scanMsg(`<span class="scanok">✔ noted as ${esc(S.fix.read)}</span>`); S.fix = null; }
       else if (a === "scanwrong") { S.wrongFor = b.dataset.id; const e = t.entries.find((x) => x.id === b.dataset.id); const sib = t.entries.filter((x) => e && x.key === e.key && x.id !== e.id && (t.st.got[x.id] || 0) < x.qty); scanMsg(`<b>${esc(plain(e ? e.name : ""))}</b>: which is it?<div class="row">${sib.map((x) => `<button class="btn" data-act="scanmove" data-id="${esc(x.id)}">${esc(x.set + " #" + x.cn)}</button>`).join("")}<button class="btn alt" data-act="scanother">Something else</button></div>`); }
       else if (a === "scanmove" && S.wrongFor) { const from = t.entries.find((x) => x.id === S.wrongFor), to = t.entries.find((x) => x.id === b.dataset.id); if (from && to) { t.st.got[from.id] = Math.max(0, (t.st.got[from.id] || 0) - 1); t.st.got[to.id] = (t.st.got[to.id] || 0) + 1; tkSave(); render(); scanMsg(`<span class="scanok">✔ moved to ${esc(to.set + " #" + to.cn)}</span>`); } S.wrongFor = null; }
