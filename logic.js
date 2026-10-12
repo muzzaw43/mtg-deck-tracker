@@ -494,6 +494,19 @@
     }
     return best && best.score >= 0.78 && best.score - second >= 0.04 ? best : null;
   }
+
+  // Look a title up in the whole card DB (used by the scanner to say what a card is when it isn't on the deck's list).
+  function matchAnyTitle(idx, text) {
+    if (!idx) return null;
+    const lines = String(text || "").split(/\n/).map(nameForm).filter((l) => l.length >= 3).slice(0, 3);
+    if (!lines.length) return null;
+    let best = null;
+    for (const k of Object.keys(idx.db)) {
+      const f = nameForm(k.split(" // ")[0]);
+      for (const l of lines) { if (Math.abs(f.length - l.length) > 4) continue; const x = 1 - lev(f, l) / Math.max(f.length, l.length); if (!best || x > best.score) best = { key: k, score: x }; }
+    }
+    return best && best.score >= 0.8 ? best : null;
+  }
   const fixDigits = (t) => String(t).toUpperCase().replace(/O/g, "0").replace(/[IL|]/g, "1");
   // Read set code, collector number and foil star from the OCR'd bottom-left text of a card.
   function parseCollector(text) {
@@ -868,7 +881,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, tickEntries, matchTitle, parseCollector, matchScan, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, tickEntries, matchTitle, matchAnyTitle, parseCollector, matchScan, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;

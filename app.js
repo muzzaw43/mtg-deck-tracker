@@ -34,9 +34,18 @@
   }
   const openModalNav = () => { if (!S.zoom && !S.ch) pushNav("modal"); };
   // Exit guard: history is [root][guard]; Back from the guard lands on root, where we ask before leaving.
+  // Chrome skips history entries a page adds before the user has touched it, which made Back leave the app without asking.
+  // So the guard entry is added on the first tap or key press instead of at load.
   try {
     const st = history.state || {};
-    if (!st.guard) { if (!st.root) history.replaceState({ root: 1 }, ""); history.pushState({ guard: 1 }, ""); }
+    if (!st.guard) {
+      if (!st.root) history.replaceState({ root: 1 }, "");
+      const arm = () => {
+        window.removeEventListener("pointerdown", arm, true); window.removeEventListener("keydown", arm, true); window.removeEventListener("touchend", arm, true);
+        try { if (!(history.state || {}).guard && !S.nav.length) history.pushState({ guard: 1 }, ""); else if (!(history.state || {}).guard) S.needGuard = true; } catch (e) { /* ignore */ }
+      };
+      window.addEventListener("pointerdown", arm, true); window.addEventListener("keydown", arm, true); window.addEventListener("touchend", arm, true);
+    }
   } catch (e) { /* ignore */ }
   window.addEventListener("popstate", () => {
     if (S.ignorePop > 0) { S.ignorePop--; return; }
@@ -664,7 +673,7 @@
     return lines.join("\n") + "\n";
   }
   // ----- camera scanner (overlay outside #view so re-renders don't kill the video) -----
-  let scanEl = null, scanLast = { key: "", n: 0 }, scanLock = false, scanLog = [];
+  let scanReads = 0, scanEl = null, scanLast = { key: "", n: 0 }, scanLock = false, scanLog = [];
   function scanMsg(html) { const m = scanEl && scanEl.querySelector("#scanmsg"); if (m) m.innerHTML = html; }
   function tkCount(e, seenNote) {
     const t = S.tk; t.st.got[e.id] = Math.min(e.qty, tkGot(e) + 1);
@@ -675,7 +684,16 @@
     const t = S.tk; if (!t || !scanEl) return;
     const m = M.matchScan(t.entries, t.st, r.title, r.bottom);
     const key = m.kind === "none" ? "" : m.kind + "|" + (m.entry ? m.entry.id : "") + "|" + (m.seen.set || "") + (m.seen.cn || "");
-    if (!key) { scanLast = { key: "", n: 0 }; scanLock = false; scanMsg(`<span class="muted">Hold a card inside the frame, name at the top and the small print at the bottom both visible.</span>`); return; }
+    if (!key) {
+      scanLast = { key: "", n: 0 }; scanLock = false;
+      const tt = (r.title || "").trim().split("\n")[0].trim(), bb = (r.bottom || "").trim().replace(/\s*\n\s*/g, " / "), cl = m.seen;
+      const any = tt ? M.matchAnyTitle(S.idx, tt) : null, nm = any ? (M.cardInfo(S.idx, any.key) || {}).name : "";
+      scanReads++;
+      const raw = `<div class="muted scanraw">Read #${scanReads}: title “${esc(tt) || "—"}” · small print “${esc(bb) || "—"}”</div>`;
+      if (nm) scanMsg(`<b>${esc(plain(nm))}</b>${cl.set && cl.cn ? ` (${esc(cl.set)} #${esc(cl.cn)})` : ""} isn't on this deck's list.<div class="row"><button class="btn alt" data-act="scanextra" data-seen="${esc(cl.set && cl.cn ? cl.set + " #" + cl.cn : "")}" data-name="${esc(nm)}">Note as extra</button></div>${raw}`);
+      else scanMsg(`<span class="muted">Can't match that yet. Fill the frame with the card, flat and well lit, name at the top and the small print at the bottom both inside it.</span>${raw}`);
+      return;
+    }
     scanLast = scanLast.key === key ? { key, n: scanLast.n + 1 } : { key, n: 1 };
     if (scanLast.n < 2 || scanLock) { if (!scanLock) scanMsg(`<span class="muted">Reading… ${esc(plain(m.entry.name))}</span>`); return; }
     scanLock = true; // one tick per card: the frame has to go blank or change before the next one counts

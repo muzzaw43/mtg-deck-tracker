@@ -127,6 +127,7 @@ On a deck, tap **Check deck** to sit down with the physical cards.
 - Choose what to check against: *as it is physically*, *the list in ManaBox*, or *with all confirmed swaps*.
 - Tap a card to tick it off; tap again to cycle back. Filters show what is left to find.
 - **Scan with camera** reads the card's name and the small print at the bottom (set code and collector number) and ticks the exact printing from your list. It warns if the card is the right name but a different printing, and notes a foil star. Hold the card in the frame with good light and steady hands. Foils and old cards (no set code) are the hardest; the name still works for those.
+- A card that isn't on the deck's list is named with a "Note as extra" button. A line at the bottom shows the raw text it read, which helps if it can't match.
 - Extra cards found in the deck can be added to "not on the list". The result is a *missing and extra* report and a *list of what's physically here*.
 - This **never** adds anything to your ManaBox collection. Ticks are kept in your browser only.
 - The camera needs permission, and the first scan downloads a text-recognition library, so it needs internet that first time.
@@ -156,6 +157,7 @@ Your fork keeps working as it is. To receive improvements: on your fork's front 
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Scanner feedback and close-confirm fix:** the scanner now says what it read, and names cards that aren't on the deck's list so you can tell it's working; the "Close the app?" prompt is armed on your first tap so Chrome can't skip it.
 - **Check deck:** tick list for a physical deck plus a camera scanner that reads the name and the set/number line.
 - **Live prices** (Scryfall, converted to AUD), loaded in the background; upgrade finder now shows card images with a reason for each suggestion.
 - **Upgrade finder, "where is this card?", values in AUD, stale-data warning, add to wishlist from a card, and an illegal-card info check.**
