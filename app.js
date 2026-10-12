@@ -716,7 +716,8 @@
     const e = m.entry, seen = m.seen.set && m.seen.cn ? `${m.seen.set} #${m.seen.cn}${m.seen.star ? " ★" : ""}` : "";
     if (m.kind === "exact") {
       if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> (${esc(e.set)} #${esc(e.cn)}) — you already ticked all ${e.qty}. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="${esc(seen)}" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
-      tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${esc(e.set)} #${esc(e.cn)} matched${m.foilNote ? " · " + esc(m.foilNote) : ""}</span>`);
+      if (m.twin) { S.scanTwin = m.twin.map((x) => x.id); scanMsg(`<b>${esc(plain(e.name))}</b> (${esc(e.set)} #${esc(e.cn)}): the deck has a foil and a normal copy. Which is this one?<div class="row">${m.twin.map((x) => `<button class="btn" data-act="scantwin" data-id="${esc(x.id)}">${x.foil ? "Foil" : "Normal"}</button>`).join("")}</div>`); scanHold = Date.now() + 12000; return; }
+      tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${esc(e.set)} #${esc(e.cn)}${e.foil ? " · list says foil" : ""}${m.foilNote ? " · " + esc(m.foilNote) : ""}</span>`);
     } else if (m.kind === "name") {
       if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> is already fully ticked. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
       tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">name matched; couldn't read the printing${e.unknown ? "" : " (list has " + esc(e.set) + " #" + esc(e.cn) + ")"}</span>`);
@@ -736,6 +737,7 @@
       const b = ev.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act, t = S.tk;
       if (a === "scanstop") { scanStop(); popNav("modal"); }
       else if (a === "scanaccept" && S.scanPend) { const e = t.entries.find((x) => x.id === S.scanPend.id); if (e) tkCount(e, S.scanPend.seen); scanMsg(`<span class="scanok">✔ counted ${esc(plain(S.scanPend.name))}</span> <span class="muted">as ${esc(S.scanPend.seen)}</span>`); S.scanPend = null; }
+      else if (a === "scantwin") { const e = t.entries.find((x) => x.id === b.dataset.id); if (e) { tkCount(e); scanHold = Date.now() + 2000; scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${e.foil ? "foil" : "normal"}</span>`); } }
       else if (a === "scanextra") { t.st.extra.push({ name: plain(b.dataset.name), seen: b.dataset.seen }); tkSave(); render(); scanMsg(`<span class="muted">Noted ${esc(plain(b.dataset.name))} as an extra.</span>`); }
     });
     try {

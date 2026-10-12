@@ -511,7 +511,7 @@
   // Read set code, collector number and foil star from the OCR'd bottom-left text of a card.
   function parseCollector(text) {
     const up = String(text || "").toUpperCase();
-    const star = /[★☆✦*]/.test(up);
+    const star = /[★☆✦]/.test(up); // only a real star glyph counts: OCR turns the bullet and specks into "*" all the time
     const flat = up.replace(/[^A-Z0-9★☆*\/•·.\- \n]/g, " ");
     let set = "", cn = "";
     const sm = flat.match(/\b([A-Z0-9]{3,5})\s*[•·.\-*]+\s*(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/) || flat.match(/\b([A-Z0-9]{3,5})\s+(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/);
@@ -532,8 +532,13 @@
     // the bottom line alone is strong, but if the title clearly names a different deck card, don't trust it
     if (hits.length && tm) { const same = hits.filter((e) => e.key === tm.key); if (same.length) hits = same; else if (tm.score >= 0.9) hits = []; }
     if (hits.length) {
-      const pick = hits.find((e) => left(e) > 0 && (cl.star ? e.foil : !e.foil)) || hits.find((e) => left(e) > 0) || hits[0];
-      return { kind: "exact", entry: pick, seen: cl, full: left(pick) <= 0, foilNote: cl.star && !pick.foil ? "star seen but the list says non-foil" : !cl.star && pick.foil ? "list says foil; no star read (not every foil has one)" : "" };
+      // The foil star can't be read reliably, so foil is only used to choose when the star is clearly there. If the deck holds both
+      // a foil and a normal copy of this printing and both are still to find, the app asks.
+      const open = hits.filter((e) => left(e) > 0);
+      let pick = cl.star ? open.find((e) => e.foil) : null;
+      const twin = !pick && open.length > 1 && open.some((e) => e.foil) && open.some((e) => !e.foil);
+      pick = pick || open[0] || hits[0];
+      return { kind: "exact", entry: pick, seen: cl, full: left(pick) <= 0, twin: twin ? open : null, foilNote: cl.star && !pick.foil ? "a foil star was read but the list says non-foil" : "" };
     }
     if (tm) {
       const cands = entries.filter((e) => e.key === tm.key);

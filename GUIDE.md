@@ -126,7 +126,7 @@ On a deck, tap **Upgrade finder**. It shows cards you already own, in the deck's
 On a deck, tap **Check deck** to sit down with the physical cards.
 - Choose what to check against: *as it is physically*, *the list in ManaBox*, or *with all confirmed swaps*.
 - Tap a card to tick it off; tap again to cycle back. Filters show what is left to find.
-- **Scan with camera** reads the card's name and the small print at the bottom (set code and collector number) and ticks the exact printing from your list. It warns if the card is the right name but a different printing, and notes a foil star. Hold the card in the frame with good light and steady hands. Foils and old cards (no set code) are the hardest; the name still works for those.
+- **Scan with camera** reads the card's name and the small print at the bottom (set code and collector number) and ticks the exact printing from your list. It warns if the card is the right name but a different printing. It cannot tell foil from normal, because the foil star is too small and OCR can't read it reliably; foil is taken from your list, and if a deck holds the same printing in both foil and normal it asks you which one you scanned. Hold the card in the frame with good light and steady hands. Foils and old cards (no set code) are the hardest; the name still works for those.
 - A card that isn't on the deck's list is named with a "Note as extra" button. A line at the bottom shows the raw text it read, which helps if it can't match.
 - Extra cards found in the deck can be added to "not on the list". The result is a *missing and extra* report and a *list of what's physically here*.
 - This **never** adds anything to your ManaBox collection. Ticks are kept in your browser only.
@@ -157,6 +157,7 @@ Your fork keeps working as it is. To receive improvements: on your fork's front 
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Foil handling:** the scanner no longer guesses foil from the star; it ticks by set and number and asks only when a deck holds both a foil and a normal copy of the same printing.
 - **Scanner reads the bottom-left small print first** (faster and exact), only reading the title when that isn't enough; steadier messages, and moving straight to the next card now counts it.
 - **Scanner feedback and close-confirm fix:** the scanner now says what it read, and names cards that aren't on the deck's list so you can tell it's working; the "Close the app?" prompt is armed on your first tap so Chrome can't skip it.
 - **Check deck:** tick list for a physical deck plus a camera scanner that reads the name and the set/number line.
