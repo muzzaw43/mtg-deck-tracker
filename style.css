@@ -139,3 +139,4 @@ tr.flag td{background:rgba(230,180,80,.16)}
 .scanframe{position:absolute;aspect-ratio:488/680;height:72%;max-width:92%;border:2px solid #7cf;border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.35);pointer-events:none}
 .scanmsg{padding:12px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));min-height:84px;font-size:14px;background:#111}.scanmsg .muted{color:#aab}.scanok{color:#6f6;font-weight:700}.scanmsg .err{color:#f88}.scanmsg .row{margin-top:8px;gap:8px}
 .scanraw{font-size:11px;margin-top:6px;word-break:break-word}
+#exitbox{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center}.exitcard{background:var(--panel);color:var(--fg,inherit);padding:18px 22px;border-radius:12px;display:flex;flex-direction:column;gap:12px;min-width:220px;text-align:center}.exitcard .row{justify-content:center;gap:12px}
