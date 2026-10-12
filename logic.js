@@ -512,9 +512,9 @@
   function parseCollector(text) {
     const up = String(text || "").toUpperCase();
     const star = /[★☆✦]/.test(up); // only a real star glyph counts: OCR turns the bullet and specks into "*" all the time
-    const flat = up.replace(/[^A-Z0-9★☆*\/•·.\- \n]/g, " ");
+    const flat = up.replace(/[^A-Z0-9★☆✦*\/•·.\- \n]/g, " ");
     let set = "", cn = "";
-    const sm = flat.match(/\b([A-Z0-9]{3,5})\s*[•·.\-*]+\s*(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/) || flat.match(/\b([A-Z0-9]{3,5})\s+(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/);
+    const sm = flat.match(/\b([A-Z0-9]{3,5})\s*[•·.\-*★☆✦]+\s*(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/) || flat.match(/\b([A-Z0-9]{3,5})\s+(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/) || flat.match(/\b([A-Z0-9]{3,5})\s+\S{1,2}\s+(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/);
     if (sm) set = sm[1];
     const nm = flat.match(/(?:^|[^A-Z0-9])0*(\d{1,4})(?:\s*\/\s*\d{1,4})?\s*[CURMLTS★☆*]?(?:[^A-Z0-9]|$)/m);
     if (nm) cn = nm[1];
