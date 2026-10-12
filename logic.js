@@ -453,6 +453,81 @@
   }
   const deckValue = (rows, deck) => rows.reduce((s, r) => (norm(r.binder) === norm(deck.name || "") ? s + (rowAUD(r) || 0) * r.qty : s), 0);
 
+
+  /* ---------- Check a physical deck: expected list + scan matching ---------- */
+  // list = [{key,name,qty}]. One entry per expected printing: {id,key,name,qty,set,cn,foil,sid}. Printings come from the deck binder first, then picks/free copies.
+  function tickEntries(deck, list, own, cfg) {
+    const al = allocateDeck(deck, list, own, cfg), out = [], got = new Map();
+    for (const l of al.lines) {
+      got.set(l.key, (got.get(l.key) || 0) + l.qty);
+      const r = l.row, foil = /foil|etched/i.test(r.foil || "") && !/^normal$/i.test(r.foil || "");
+      const id = [l.key, r.set, r.cn, foil ? "f" : "n"].join("|"), ex = out.find((e) => e.id === id);
+      if (ex) ex.qty += l.qty; else out.push({ id, key: l.key, name: l.name, qty: l.qty, set: (r.set || "").toUpperCase(), cn: r.cn || "", foil, sid: r.sid || "", unknown: false });
+    }
+    for (const e of list) {
+      const rest = e.qty - (got.get(e.key) || 0);
+      if (rest > 0) out.push({ id: e.key + "|?", key: e.key, name: e.name, qty: rest, set: "", cn: "", foil: false, sid: "", unknown: true });
+    }
+    return out;
+  }
+  const lev = (a, b) => {
+    const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) { const cur = [i]; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; }
+    return prev[n];
+  };
+  const nameForm = (t) => String(t || "").toLowerCase().replace(/[^a-z' ,\-]/g, " ").replace(/\s+/g, " ").trim();
+  // Best fuzzy match of OCR'd title text against the deck's card names. Returns {key,score} or null.
+  function matchTitle(entries, text) {
+    const lines = String(text || "").split(/\n/).map(nameForm).filter((l) => l.length >= 3);
+    if (!lines.length) return null;
+    const names = new Map();
+    for (const e of entries) names.set(e.key, e.name);
+    let best = null, second = 0;
+    for (const [key, nm] of names) {
+      const faces = String(nm).split(" // ").map(nameForm).concat([nameForm(nm)]);
+      let sc = 0;
+      for (const f of faces) for (const l of lines.slice(0, 3)) { const x = 1 - lev(f, l) / Math.max(f.length, l.length); if (x > sc) sc = x; }
+      if (!best || sc > best.score) { if (best) second = best.score; best = { key, score: sc }; } else if (sc > second) second = sc;
+    }
+    return best && best.score >= 0.78 && best.score - second >= 0.04 ? best : null;
+  }
+  const fixDigits = (t) => String(t).toUpperCase().replace(/O/g, "0").replace(/[IL|]/g, "1");
+  // Read set code, collector number and foil star from the OCR'd bottom-left text of a card.
+  function parseCollector(text) {
+    const up = String(text || "").toUpperCase();
+    const star = /[★☆✦*]/.test(up);
+    const flat = up.replace(/[^A-Z0-9★☆*\/•·.\- \n]/g, " ");
+    let set = "", cn = "";
+    const sm = flat.match(/\b([A-Z0-9]{3,5})\s*[•·.\-*]+\s*(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/) || flat.match(/\b([A-Z0-9]{3,5})\s+(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/);
+    if (sm) set = sm[1];
+    const nm = flat.match(/(?:^|[^A-Z0-9])0*(\d{1,4})(?:\s*\/\s*\d{1,4})?\s*[CURMLTS★☆*]?(?:[^A-Z0-9]|$)/m);
+    if (nm) cn = nm[1];
+    return { set, cn, star };
+  }
+  const cnNum = (c) => String(c || "").replace(/^0+/, "").replace(/[^0-9].*$/, "");
+  // Decide what a scanned card is. state = { got: {entryId: n} }. Returns {kind, entry?, seen?, why}.
+  //  kind: exact (set+number match an expected printing) | name (title matched, printing not readable) | diff (title matched, printing read but not expected) | none
+  function matchScan(entries, state, title, bottom) {
+    const got = (state && state.got) || {}, left = (e) => e.qty - (got[e.id] || 0);
+    const cl = parseCollector(bottom), tm = matchTitle(entries, title);
+    const full = (e) => e.set && e.cn;
+    let hits = [];
+    if (cl.set && cl.cn) hits = entries.filter((e) => full(e) && fixDigits(e.set) === fixDigits(cl.set) && cnNum(e.cn) === cnNum(cl.cn));
+    // the bottom line alone is strong, but if the title clearly names a different deck card, don't trust it
+    if (hits.length && tm) { const same = hits.filter((e) => e.key === tm.key); if (same.length) hits = same; else if (tm.score >= 0.9) hits = []; }
+    if (hits.length) {
+      const pick = hits.find((e) => left(e) > 0 && (cl.star ? e.foil : !e.foil)) || hits.find((e) => left(e) > 0) || hits[0];
+      return { kind: "exact", entry: pick, seen: cl, full: left(pick) <= 0, foilNote: cl.star && !pick.foil ? "star seen but the list says non-foil" : !cl.star && pick.foil ? "list says foil; no star read (not every foil has one)" : "" };
+    }
+    if (tm) {
+      const cands = entries.filter((e) => e.key === tm.key);
+      if (cl.set && cl.cn) return { kind: "diff", entry: cands.find((e) => left(e) > 0) || cands[0], seen: cl, why: "different printing from the list" };
+      const pick = cands.find((e) => left(e) > 0) || cands[0];
+      return { kind: "name", entry: pick, seen: cl, full: left(pick) <= 0 };
+    }
+    return { kind: "none", seen: cl };
+  }
   /* ---------- Rebuild a deck from the collection (choose printings) ---------- */
   // Rows of this card that could go in this deck: its own deck binder, free binders, and spare copies in multi-copy binders.
   function eligibleRows(own, key, deck, cfg) {
@@ -791,7 +866,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, tickEntries, matchTitle, parseCollector, matchScan, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;

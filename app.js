@@ -15,7 +15,7 @@
   /* ---------- phone back button: closes pop-ups, then leaves the deck ---------- */
   S.nav = []; S.ignorePop = 0;
   async function forceRefresh() {
-    const files = ["./", "index.html", "style.css", "app.js", "logic.js", "manifest.json"];
+    const files = ["./", "index.html", "style.css", "app.js", "scan.js", "logic.js", "manifest.json"];
     try { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister())); } catch (e) { /* no SW */ }
     try { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } catch (e) { /* no cache API */ }
     try { await Promise.all(files.map((f) => fetch(f, { cache: "reload" }))); } catch (e) { /* offline */ }
@@ -51,6 +51,8 @@
     const t = S.nav.pop();
     if (t === "modal") { S.zoom = null; S.ch = null; }
     else if (t === "deck") S.deck = null;
+    else if (t === "tick") { S.tk = null; }
+    if (t === "modal" && scanEl) scanStop();
     render();
   });
 
@@ -594,8 +596,126 @@
     if (list.length > lim) h += `<button class="btn" data-act="upgmore">Show more</button>`;
     return h + `</div>`;
   }
+  /* ---------- check a physical deck (tick list + camera scanner) ---------- */
+  const TK_MODES = { physical: "As it is physically (ManaBox + swaps made)", current: "List in ManaBox", swaps: "With all confirmed swaps" };
+  const tkKey = (slug, mode) => "mtg_tick_" + slug + "_" + mode;
+  function tkLoad(slug, mode) { try { const j = JSON.parse(localStorage.getItem(tkKey(slug, mode)) || "null"); if (j && j.got) return j; } catch (e) { /* none */ } return { got: {}, diff: {}, extra: [], at: "" }; }
+  function tkSave() { const t = S.tk; if (!t) return; t.st.at = new Date().toISOString(); try { localStorage.setItem(tkKey(t.slug, t.mode), JSON.stringify(t.st)); } catch (e) { /* ignore */ } }
+  function tkList(d, mode) {
+    const l = mode === "swaps" ? M.applySwaps(d, S.idx, { only: ["approved", "made"] }) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
+    return l.map((c) => ({ key: c.key || M.keyOf(S.idx, c.name), name: c.name, qty: c.qty }));
+  }
+  function tkOpen(d, mode) {
+    mode = mode || (S.tk && S.tk.mode) || "physical";
+    const entries = M.tickEntries(d, tkList(d, mode), S.own, S.cfg);
+    const kind = (k) => ((M.cardInfo(S.idx, k) || {}).frontType || "").replace(/^(Legendary |Basic |Snow |Token )+/, "").match(/Land|Creature|Planeswalker|Instant|Sorcery|Artifact|Enchantment|Battle/);
+    entries.forEach((e) => { const m = kind(e.key); e.type = m ? m[0] : "Other"; });
+    S.tk = { slug: d.slug, mode, entries, st: tkLoad(d.slug, mode), filter: (S.tk && S.tk.filter) || "todo", msg: "" };
+  }
+  const tkGot = (e) => (S.tk.st.got[e.id] || 0);
+  function tkTotals() { const t = S.tk; let have = 0, want = 0; for (const e of t.entries) { have += Math.min(e.qty, tkGot(e)); want += e.qty; } return { have, want }; }
+  function vTick(d) {
+    const t = S.tk, { have, want } = tkTotals(), pct = want ? Math.round((have / want) * 100) : 0;
+    const issues = Object.keys(t.st.diff).filter((id) => t.entries.some((e) => e.id === id)).length;
+    let h = `<div class="card"><div class="row"><b>Check ${esc(d.name || d.slug)}</b><button class="btn alt" data-act="tkback">Back to deck</button></div>
+      <div class="muted">Go through the physical deck and tick cards off. Nothing here is added to your collection or saved to ManaBox; it only compares what's in your hands with the list.</div>
+      <div class="chips vt">${Object.entries(TK_MODES).map(([k, v]) => `<button data-act="tkmode" data-m="${k}" class="${t.mode === k ? "on" : ""}">${esc(v)}</button>`).join("")}</div>
+      <div class="row" style="margin-top:8px"><b>${have} of ${want} found</b><span class="muted">${want - have} to find${issues ? " · " + issues + " different printing" + (issues > 1 ? "s" : "") : ""}</span></div>
+      <div class="bar"><i class="c0" style="width:${pct}%"></i></div>
+      <div class="row" style="margin-top:8px"><button class="btn" data-act="tkscan">Scan with camera</button><button class="btn alt" data-act="tkreset">Start over</button></div></div>`;
+    const fl = { todo: "Still to find", all: "All", done: "Found", diff: "Different printing" };
+    h += `<div class="chips vt">${Object.entries(fl).map(([k, v]) => `<button data-act="tkfilter" data-f="${k}" class="${t.filter === k ? "on" : ""}">${v}</button>`).join("")}</div>`;
+    const show = t.entries.filter((e) => t.filter === "all" || (t.filter === "todo" ? tkGot(e) < e.qty : t.filter === "done" ? tkGot(e) >= e.qty : !!t.st.diff[e.id]));
+    const order = ["Creature", "Planeswalker", "Instant", "Sorcery", "Artifact", "Enchantment", "Battle", "Land", "Other"];
+    for (const ty of order) {
+      const g = show.filter((e) => e.type === ty).sort((a, b) => a.name.localeCompare(b.name));
+      if (!g.length) continue;
+      h += `<h3>${ty} <span class="muted">${g.reduce((s2, e) => s2 + e.qty, 0)}</span></h3>`;
+      h += g.map((e) => {
+        const n = tkGot(e), done = n >= e.qty, df = t.st.diff[e.id];
+        const img = e.sid ? M.artUrl(e.sid, "art_crop") : M.artByName(e.name, "art_crop");
+        return `<div class="cardrow tkrow ${done ? "done" : ""}" data-act="tkflip" data-id="${esc(e.id)}"><div class="t"><span class="n"><img class="thumb" loading="lazy" alt="" src="${esc(img)}">${esc(plain(e.name))}
+          <span class="muted tkp">${e.unknown ? "printing not known" : esc(e.set + " #" + e.cn) + (e.foil ? " · foil" : "")}${df ? ` · <b>found as ${esc(df.join(", "))}</b>` : ""}</span></span>
+          <span class="tkc ${done ? "ok" : ""}">${n}/${e.qty}</span></div></div>`;
+      }).join("");
+    }
+    if (!show.length) h += `<div class="card muted">${t.filter === "todo" ? "Everything is ticked off." : "Nothing here."}</div>`;
+    h += `<div class="card"><b>Cards that shouldn't be in this deck</b><div class="muted">Found something in the deck that isn't on the list? Add it here. It is only noted in this check.</div>
+      <div class="row"><input type="text" id="tkx" placeholder="Card name" autocomplete="off" style="flex:1"><button class="btn" data-act="tkxadd">Add</button></div>
+      ${t.st.extra.map((x, i) => `<div class="row"><span>${esc(x.name)}${x.seen ? ` <span class="muted">(${esc(x.seen)})</span>` : ""}</span><button class="btn alt" data-act="tkxdel" data-i="${i}">Remove</button></div>`).join("")}</div>
+      <div class="card"><b>Results</b><div class="row"><button class="btn" data-act="tkreport">Missing &amp; extra report</button><button class="btn alt" data-act="tklist">List of what's physically here</button></div></div>`;
+    return h;
+  }
+  function tkReport(kind) {
+    const t = S.tk, d = deckBySlug(t.slug), lines = [];
+    const sw = (e) => `${e.name}${e.unknown ? "" : " (" + e.set + " #" + e.cn + (e.foil ? " foil" : "") + ")"}`;
+    if (kind === "list") {
+      for (const e of t.entries) { const n = Math.min(e.qty, tkGot(e)); if (n > 0) lines.push(`${n} ${plain(e.name)}${e.unknown ? "" : " (" + e.set + ") " + e.cn}${e.foil ? " *F*" : ""}${t.st.diff[e.id] ? "  // found as " + t.st.diff[e.id].join(", ") : ""}`); }
+      for (const x of t.st.extra) lines.push(`1 ${x.name}  // not on the list${x.seen ? " — " + x.seen : ""}`);
+      return lines.join("\n") + "\n";
+    }
+    const { have, want } = tkTotals();
+    lines.push(`${d.name || d.slug} — ${TK_MODES[t.mode]}`, `${have} of ${want} found`, "");
+    const miss = t.entries.filter((e) => tkGot(e) < e.qty);
+    lines.push(miss.length ? "MISSING:" : "Nothing missing.", ...miss.map((e) => `  ${e.qty - Math.min(e.qty, tkGot(e))}× ${sw(e)}`));
+    const dif = t.entries.filter((e) => t.st.diff[e.id]);
+    if (dif.length) lines.push("", "DIFFERENT PRINTING FROM THE LIST:", ...dif.map((e) => `  ${plain(e.name)}: list ${e.set} #${e.cn}${e.foil ? " foil" : ""}, found ${t.st.diff[e.id].join(", ")}`));
+    if (t.st.extra.length) lines.push("", "IN THE DECK BUT NOT ON THE LIST:", ...t.st.extra.map((x) => `  ${x.name}${x.seen ? " (" + x.seen + ")" : ""}`));
+    return lines.join("\n") + "\n";
+  }
+  // ----- camera scanner (overlay outside #view so re-renders don't kill the video) -----
+  let scanEl = null, scanLast = { key: "", n: 0 }, scanLock = false, scanLog = [];
+  function scanMsg(html) { const m = scanEl && scanEl.querySelector("#scanmsg"); if (m) m.innerHTML = html; }
+  function tkCount(e, seenNote) {
+    const t = S.tk; t.st.got[e.id] = Math.min(e.qty, tkGot(e) + 1);
+    if (seenNote) { const a = t.st.diff[e.id] || []; if (!a.includes(seenNote)) a.push(seenNote); t.st.diff[e.id] = a; }
+    tkSave(); render();
+  }
+  function scanResult(r) {
+    const t = S.tk; if (!t || !scanEl) return;
+    const m = M.matchScan(t.entries, t.st, r.title, r.bottom);
+    const key = m.kind === "none" ? "" : m.kind + "|" + (m.entry ? m.entry.id : "") + "|" + (m.seen.set || "") + (m.seen.cn || "");
+    if (!key) { scanLast = { key: "", n: 0 }; scanLock = false; scanMsg(`<span class="muted">Hold a card inside the frame, name at the top and the small print at the bottom both visible.</span>`); return; }
+    scanLast = scanLast.key === key ? { key, n: scanLast.n + 1 } : { key, n: 1 };
+    if (scanLast.n < 2 || scanLock) { if (!scanLock) scanMsg(`<span class="muted">Reading… ${esc(plain(m.entry.name))}</span>`); return; }
+    scanLock = true; // one tick per card: the frame has to go blank or change before the next one counts
+    const e = m.entry, seen = m.seen.set && m.seen.cn ? `${m.seen.set} #${m.seen.cn}${m.seen.star ? " ★" : ""}` : "";
+    if (m.kind === "exact") {
+      if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> (${esc(e.set)} #${esc(e.cn)}) — you already ticked all ${e.qty}. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="${esc(seen)}" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
+      tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${esc(e.set)} #${esc(e.cn)} matched${m.foilNote ? " · " + esc(m.foilNote) : ""}</span>`);
+    } else if (m.kind === "name") {
+      if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> is already fully ticked. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
+      tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">name matched; couldn't read the printing${e.unknown ? "" : " (list has " + esc(e.set) + " #" + esc(e.cn) + ")"}</span>`);
+    } else if (m.kind === "diff") {
+      S.scanPend = { id: e.id, seen, name: e.name };
+      scanMsg(`<b>${esc(plain(e.name))}</b>: this is <b>${esc(seen)}</b>${m.seen.star ? " (foil star)" : ""} but the list has <b>${esc(e.unknown ? "an unknown printing" : e.set + " #" + e.cn + (e.foil ? " foil" : ""))}</b>.<div class="row"><button class="btn" data-act="scanaccept">Count it</button><button class="btn alt" data-act="scanextra" data-seen="${esc(seen)}" data-name="${esc(e.name)}">It's an extra</button></div>`);
+    }
+  }
+  async function tkScan() {
+    if (scanEl) return;
+    scanEl = document.createElement("div"); scanEl.id = "scanpanel";
+    scanEl.innerHTML = `<div class="scantop"><b id="scanprog"></b><button class="btn alt" data-act="scanstop">Done</button></div>
+      <div class="scanwrap"><video id="scanv" playsinline muted></video><div class="scanframe"></div></div>
+      <div id="scanmsg" class="scanmsg"><span class="muted">Starting the camera…</span></div>`;
+    document.body.appendChild(scanEl); pushNav("modal");
+    scanEl.addEventListener("click", (ev) => {
+      const b = ev.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act, t = S.tk;
+      if (a === "scanstop") { scanStop(); popNav("modal"); }
+      else if (a === "scanaccept" && S.scanPend) { const e = t.entries.find((x) => x.id === S.scanPend.id); if (e) tkCount(e, S.scanPend.seen); scanMsg(`<span class="scanok">✔ counted ${esc(plain(S.scanPend.name))}</span> <span class="muted">as ${esc(S.scanPend.seen)}</span>`); S.scanPend = null; }
+      else if (a === "scanextra") { t.st.extra.push({ name: plain(b.dataset.name), seen: b.dataset.seen }); tkSave(); render(); scanMsg(`<span class="muted">Noted ${esc(plain(b.dataset.name))} as an extra.</span>`); }
+    });
+    try {
+      await window.MTGScan.start($("#scanv"), (m) => scanMsg(`<span class="muted">${esc(m)}</span>`));
+      const vid = $("#scanv"), fit = () => { const w = scanEl && scanEl.querySelector(".scanwrap"), fr = scanEl && scanEl.querySelector(".scanframe"); if (!w || !fr || !vid.videoWidth) return; const k = Math.min(w.clientWidth / vid.videoWidth, w.clientHeight / vid.videoHeight), c = window.MTGScan.cardRect(vid.videoWidth, vid.videoHeight); fr.style.height = c.h * k + "px"; fr.style.maxWidth = "none"; fr.style.width = c.w * k + "px"; };
+      fit(); window.addEventListener("resize", fit); vid.addEventListener("loadedmetadata", fit);
+      scanMsg(`<span class="muted">Hold a card inside the frame.</span>`);
+      window.MTGScan.loop($("#scanv"), (r) => { const p = $("#scanprog"); if (p) { const x = tkTotals(); p.textContent = `${x.have} of ${x.want} found`; } scanResult(r); });
+    } catch (e) { scanMsg(`<span class="err">${esc(e.name === "NotAllowedError" ? "Camera permission was refused. Allow it in the browser's site settings and try again." : e.message)}</span>`); }
+  }
+  function scanStop() { try { window.MTGScan.stop(); } catch (e) { /* ignore */ } if (scanEl) { scanEl.remove(); scanEl = null; } scanLast = { key: "", n: 0 }; scanLock = false; S.scanPend = null; render(); }
   function vDeck(d) {
     if (!d) { S.deck = null; return vDecks(); }
+    if (S.tk && S.tk.slug === d.slug) return vTick(d);
     const m = M.deckMap(d, S.idx), pens = M.activePencils(d);
     const outKeys = new Set(pens.filter((p) => p.out).map((p) => M.keyOf(S.idx, p.out)));
     const cmds = M.commandersOf(d), ck = cmds.length ? M.keyOf(S.idx, cmds[0]) : "";
@@ -604,7 +724,7 @@
       <div class="hero">${ck ? artImg(ck, cmds[0], d, "art_crop", "heroimg") : ""}<div class="heroin"><div class="herot">${esc(d.name || d.slug)}</div>
       <div class="herom">${esc(cmds.join(" + "))}</div>
       <div class="herom">${esc(d.status || "planned")} · ${M.deckTotal(m)} cards${S.rows.length && M.deckValue(S.rows, d) ? ` · worth about $${M.deckValue(S.rows, d).toFixed(0)} AUD` : ""}${nMade ? ` · ${nMade} made by hand` : ""}${nPen ? ` · ${nPen} pencilled` : ""}${d.updated ? " · updated " + esc(d.updated) : ""}</div></div></div>
-      <div><button class="btn" data-act="stats">${S.statsOpen ? "Hide stats" : "Deck stats"}</button><button class="btn" data-act="upg">${S.upgOpen ? "Hide upgrades" : "Upgrade finder"}</button><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
+      <div><button class="btn" data-act="stats">${S.statsOpen ? "Hide stats" : "Deck stats"}</button><button class="btn" data-act="upg">${S.upgOpen ? "Hide upgrades" : "Upgrade finder"}</button><button class="btn" data-act="tkopen" data-slug="${esc(d.slug)}">Check deck</button><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
       ${pens.some((p) => M.pencilStatus(p) === "made") ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="physical">Export list as it is physically</button>` : ""}
       ${pens.some((p) => ["approved", "made"].includes(M.pencilStatus(p))) ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with confirmed changes</button>` : ""}</div>
       ${pens.some((p) => M.pencilStatus(p) === "pencilled") ? `<div class="muted">Pencilled swaps aren't in any export until you approve them.</div>` : ""}`;
@@ -1094,17 +1214,28 @@
     if (Date.now() < S.noClickUntil) { ev.preventDefault(); ev.stopPropagation(); return; }
     if (ev.target.closest && ev.target.closest("#refresh")) { forceRefresh(); return; }
     const tabBtn = ev.target.closest("#tabs button");
-    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
+    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.tk = null; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
     const el = ev.target.closest("[data-act]");
     if (!el) return;
     const a = el.dataset.act;
     if (a === "toggle") { const o = el.querySelector("[data-o]"); if (o) o.hidden = !o.hidden; }
-    else if (a === "open") { S.deck = el.dataset.slug; pushNav("deck"); render(); window.scrollTo(0, 0); }
-    else if (a === "back") { S.deck = null; popNav("deck"); render(); }
+    else if (a === "open") { S.tk = null; S.deck = el.dataset.slug; pushNav("deck"); render(); window.scrollTo(0, 0); }
+    else if (a === "back") { S.tk = null; S.deck = null; popNav("deck"); render(); }
     else if (a === "level") { S.level = el.dataset.l; render(); }
     else if (a === "closeout") { S.out = null; render(); }
     else if (a === "copy") { const ok = await copyText(S.out.text); el.textContent = ok ? "Copied ✓" : "Select the text and copy it manually"; }
     else if (a === "download") download(S.out.filename, S.out.text);
+    else if (a === "tkopen") { tkOpen(deckBySlug(el.dataset.slug)); pushNav("tick"); render(); window.scrollTo(0, 0); }
+    else if (a === "tkback") { scanStop(); S.tk = null; popNav("tick"); render(); }
+    else if (a === "tkmode") { tkOpen(deckBySlug(S.tk.slug), el.dataset.m); render(); }
+    else if (a === "tkfilter") { S.tk.filter = el.dataset.f; render(); }
+    else if (a === "tkflip") { const e = S.tk.entries.find((x) => x.id === el.dataset.id); if (e) { const n = tkGot(e); S.tk.st.got[e.id] = n >= e.qty ? 0 : n + 1; if (!S.tk.st.got[e.id]) delete S.tk.st.diff[e.id]; tkSave(); render(); } }
+    else if (a === "tkreset") { if (confirm("Clear every tick for this check?")) { S.tk.st = { got: {}, diff: {}, extra: [], at: "" }; tkSave(); render(); } }
+    else if (a === "tkxadd") { const v = ($("#tkx").value || "").trim(); if (v) { const k = M.keyOf(S.idx, v), nm = (M.cardInfo(S.idx, k) || {}).name || v; S.tk.st.extra.push({ name: nm, seen: "" }); tkSave(); render(); } }
+    else if (a === "tkxdel") { S.tk.st.extra.splice(+el.dataset.i, 1); tkSave(); render(); }
+    else if (a === "tkreport") showOut((deckBySlug(S.tk.slug).name || "") + " — check report", tkReport("report"), S.tk.slug + "_check.txt");
+    else if (a === "tklist") showOut((deckBySlug(S.tk.slug).name || "") + " — what's physically here", tkReport("list"), S.tk.slug + "_physical.txt");
+    else if (a === "tkscan") tkScan();
     else if (a === "exportdeck") {
       const d = deckBySlug(el.dataset.slug);
       const mode = el.dataset.mode;
