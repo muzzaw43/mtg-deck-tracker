@@ -159,17 +159,18 @@
     await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
     refState.busy = false; onProg && onProg(refState);
   }
-  function visualMatch(canvas, ids) {
+  // Recognise the card (by name), not the printing: printings of one card often look alike, so score each card by its best printing.
+  function visualMatch(canvas, cands) {
     if (!refs.size) return null;
-    const a = desc(canvas, false), b = desc(canvas, true);
-    let best = null, second = -1;
-    for (const id of ids) {
-      const r = refs.get(id); if (!r) continue;
-      const s1 = ncc(a, r), s2 = ncc(b, r), sc = Math.max(s1, s2), fl = s2 > s1;
-      if (!best || sc > best.score) { if (best) second = Math.max(second, best.score); best = { id, score: sc, flipped: fl }; } else if (sc > second) second = sc;
+    const a = desc(canvas, false), b = desc(canvas, true), byKey = new Map();
+    for (const c of cands) {
+      const r = refs.get(c.id); if (!r) continue;
+      const s1 = ncc(a, r), s2 = ncc(b, r), sc = Math.max(s1, s2), g = byKey.get(c.key) || { key: c.key, score: -1, id: "", flipped: false, scores: {} };
+      g.scores[c.id] = sc; if (sc > g.score) { g.score = sc; g.id = c.id; g.flipped = s2 > s1; } byKey.set(c.key, g);
     }
+    const all = [...byKey.values()].sort((x, y) => y.score - x.score), best = all[0];
     if (!best) return null;
-    best.margin = best.score - Math.max(second, 0);
+    best.margin = best.score - (all[1] ? Math.max(all[1].score, 0) : 0);
     best.ok = best.score >= 0.5 && best.margin >= 0.08;
     return best;
   }
@@ -180,7 +181,7 @@
     return { x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch, fx: (w - cw) / 2 / w, fy: (h - ch) / 2 / h, fw: cw / w, fh: ch / h };
   }
   // Bottom-left small print first (it identifies the exact printing); the title is only read when that wasn't enough.
-  let candIds = null; // ids of the cards worth matching (the deck's list)
+  let candIds = null, skipText = null; // candidates worth matching (the deck's list); skipText(visual) says when no text needs reading
   async function readFrame(src, w, h, enough) {
     const ws = await init();
     let card = cardRect(w, h), img = src, found = false, quad = null;
@@ -190,9 +191,10 @@
       let vimg = img;
       if (!found) { vimg = document.createElement("canvas"); vimg.width = 360; vimg.height = Math.round(360 / RATIO); vimg.getContext("2d").drawImage(src, card.x, card.y, card.w, card.h, 0, 0, vimg.width, vimg.height); }
       try { out.visual = visualMatch(vimg, candIds); } catch (e) { /* ignore */ }
-      if (out.visual && out.visual.ok) return out; // recognised by its picture: no need to read any text
+      if (out.visual && out.visual.ok && skipText && skipText(out.visual)) return out; // recognised by its picture: no text needed
     }
     out.bottom = (await ws.bottom.recognize(strip(img, card, 0.03, 0.915, 0.60, 0.985, 900))).data.text;
+    if (out.visual && out.visual.ok) return out;
     if (!enough || !enough(out.bottom)) out.title = (await ws.title.recognize(strip(img, card, 0.05, 0.035, 0.80, 0.105, 700))).data.text;
     return out;
   }
@@ -213,5 +215,5 @@
     tick();
   }
   function stop() { running = false; if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; } }
-  window.MTGScan = { setRefs, setCandidates: (ids) => { candIds = ids; }, refState: () => refState, start, loop, stop, readFrame, cardRect, init, RATIO };
+  window.MTGScan = { setRefs, setCandidates: (c, sk) => { candIds = c; skipText = sk || null; }, refState: () => refState, start, loop, stop, readFrame, cardRect, init, RATIO };
 })();

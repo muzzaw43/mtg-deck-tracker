@@ -170,6 +170,7 @@ GitHub pauses scheduled jobs in a repository nothing has happened in for about t
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Different printings are fine:** the scanner recognises the card by name first, then reads the set/number to match the right printing, or counts it and notes "found as OTC #280" when it isn't the printing in the list.
 - **Scanner matches the card's picture** (like ManaBox): it learns the deck's card pictures from Scryfall, finds the card's outline even at an angle, straightens it and compares the picture, so most cards are recognised instantly without reading any text. Text reading is the fallback.
 - **Scanner finds the card's outline** (OpenCV) and straightens it before reading, so alignment matters much less.
 - **Automatic updates for forks:** a daily *Sync with upstream* job (opt out any time).

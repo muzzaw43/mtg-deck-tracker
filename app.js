@@ -698,10 +698,29 @@
     tkSave(); render();
   }
   function scanResult(r) { S.scanOK = false; scanResult0(r); return S.scanOK; }
+  // After a card was ticked by its picture alone, read the small print while it is still in view and fix up the printing if it differs.
+  function refinePrinting(r) {
+    const t = S.tk, f = S.refine, cl = M.parseCollector(r.bottom), left = (e) => e.qty - (t.st.got[e.id] || 0);
+    if (!(cl.set && cl.cn)) { if (++f.tries >= 3) f.done = true; return; }
+    f.done = true;
+    const ents = t.entries.filter((e) => e.key === f.key), cur = ents.find((e) => e.id === f.id), same = (e) => e.set && M.fixDigits(e.set) === M.fixDigits(cl.set) && M.cnNum(e.cn) === M.cnNum(cl.cn);
+    if (cur && same(cur)) return;
+    const other = ents.find((e) => same(e) && left(e) > 0), seen = `${cl.set} #${cl.cn}`;
+    if (other && cur) { t.st.got[cur.id] = Math.max(0, (t.st.got[cur.id] || 0) - 1); t.st.got[other.id] = (t.st.got[other.id] || 0) + 1; tkSave(); render(); scanMsg(`<span class="scanok">✔ ${esc(plain(cur.name))}</span> <span class="muted">${esc(seen)} (matched to that printing in the list)</span>`); }
+    else if (cur) { const a = t.st.diff[cur.id] || []; if (!a.includes(seen)) a.push(seen); t.st.diff[cur.id] = a; tkSave(); render(); scanMsg(`<span class="scanok">✔ ${esc(plain(cur.name))}</span> <span class="muted">${esc(seen)} · the list has ${esc(cur.set + " #" + cur.cn)}; noted as a different printing</span>`); }
+  }
   function scanResult0(r) {
     const t = S.tk; if (!t || !scanEl) return;
     let m;
-    if (r.visual && r.visual.ok) { const ve = t.entries.find((x) => x.id === r.visual.id); m = ve ? { kind: "exact", entry: ve, seen: {}, full: ve.qty - (t.st.got[ve.id] || 0) <= 0 } : M.matchScan(t.entries, t.st, r.title, r.bottom); }
+    if (r.visual && r.visual.ok) {
+      // The picture says which card; the small print (when it was read) says which printing.
+      const ents = t.entries.filter((e) => e.key === r.visual.key), left = (e) => e.qty - (t.st.got[e.id] || 0), cl = M.parseCollector(r.bottom || "");
+      const hit = cl.set && cl.cn ? ents.find((e) => e.set && M.fixDigits(e.set) === M.fixDigits(cl.set) && M.cnNum(e.cn) === M.cnNum(cl.cn) && left(e) > 0) || ents.find((e) => e.set && M.fixDigits(e.set) === M.fixDigits(cl.set) && M.cnNum(e.cn) === M.cnNum(cl.cn)) : null;
+      const open = ents.filter((e) => left(e) > 0).sort((a, b) => (r.visual.scores[b.id] || 0) - (r.visual.scores[a.id] || 0));
+      if (hit) m = { kind: "exact", entry: hit, seen: cl, full: left(hit) <= 0 };
+      else if (cl.set && cl.cn) m = { kind: "diff", entry: open[0] || ents[0], seen: cl, full: !open.length };
+      else m = { kind: "exact", entry: open[0] || ents[0], seen: {}, full: !open.length };
+    }
     else m = M.matchScan(t.entries, t.st, r.title, r.bottom);
     const key = m.kind === "none" ? "" : m.kind + "|" + (m.entry ? m.entry.id : "") + "|" + (m.seen.set || "") + (m.seen.cn || "");
     if (!key) {
@@ -717,22 +736,24 @@
       return;
     }
     S.scanOK = true;
+    if (scanLock && S.refine && !S.refine.done && r.visual && r.visual.ok && r.visual.key === S.refine.key && (r.bottom || "").trim()) refinePrinting(r);
     if (scanLock) { if (m.entry && m.entry.id === scanLockId) { scanMiss = 0; return; } if (++scanMiss < 2) return; scanLock = false; scanLockId = ""; }
     scanLast = scanLast.key === key ? { key, n: scanLast.n + 1 } : { key, n: 1 };
     if (scanLast.n < 2) return;
     scanMiss = 0; scanLockId = m.entry ? m.entry.id : "";
-    scanHold = Date.now() + (m.kind === "diff" ? 12000 : 3000);
+    scanHold = Date.now() + 3000;
     scanLock = true; // one tick per card: the frame has to go blank or change before the next one counts
     const e = m.entry, seen = m.seen.set && m.seen.cn ? `${m.seen.set} #${m.seen.cn}` : "";
     if (m.kind === "exact") {
       if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> (${esc(e.set)} #${esc(e.cn)}) — you already ticked all ${e.qty}. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="${esc(seen)}" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
       tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${esc(e.set)} #${esc(e.cn)}</span>`);
+      if (r.visual && r.visual.ok && !(r.bottom || "").trim()) S.refine = { key: r.visual.key, id: e.id, tries: 0, done: false };
     } else if (m.kind === "name") {
       if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> is already fully ticked. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
       tkCount(e); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">name matched; couldn't read the printing${e.unknown ? "" : " (list has " + esc(e.set) + " #" + esc(e.cn) + ")"}</span>`);
     } else if (m.kind === "diff") {
-      S.scanPend = { id: e.id, seen, name: e.name };
-      scanMsg(`<b>${esc(plain(e.name))}</b>: this is <b>${esc(seen)}</b> but the list has <b>${esc(e.unknown ? "an unknown printing" : e.set + " #" + e.cn)}</b>.<div class="row"><button class="btn" data-act="scanaccept">Count it</button><button class="btn alt" data-act="scanextra" data-seen="${esc(seen)}" data-name="${esc(e.name)}">It's an extra</button></div>`);
+      if (m.full) { scanMsg(`<b>${esc(plain(e.name))}</b> (${esc(seen)}) — all ${e.qty} already ticked. An extra copy?<div class="row"><button class="btn alt" data-act="scanextra" data-seen="${esc(seen)}" data-name="${esc(e.name)}">Note as extra</button></div>`); return; }
+      tkCount(e, seen); scanMsg(`<span class="scanok">✔ ${esc(plain(e.name))}</span> <span class="muted">${esc(seen)} · the list has ${esc(e.unknown ? "an unknown printing" : e.set + " #" + e.cn)}; counted and noted as a different printing</span>`);
     }
   }
   /* ---------- scan in a deck list from scratch (nothing is added to the collection) ---------- */
@@ -827,7 +848,7 @@
       fit(); window.addEventListener("resize", fit); vid.addEventListener("loadedmetadata", fit);
       scanMsg(`<span class="muted">Hold a card inside the frame.</span>`);
       if (S.scanMode === "tick" && S.tk) {
-        window.MTGScan.setCandidates(S.tk.entries.map((e) => e.id));
+        window.MTGScan.setCandidates(S.tk.entries.map((e) => ({ id: e.id, key: e.key })), (v) => S.tk.entries.filter((e) => e.key === v.key).length === 1 && v.score >= 0.7 && !(S.refine && !S.refine.done && S.refine.key === v.key));
         window.MTGScan.setRefs(S.tk.entries.map((e) => ({ id: e.id, url: e.sid ? M.artUrl(e.sid, "small") : M.artByName(e.name, "small") })), () => { const fd = $("#scanfound"); if (fd && scanEl) fd.textContent = fd.textContent.replace(/ · (learning the deck|picture matching).*$/, "") + refNote(); });
       } else window.MTGScan.setCandidates(null);
       window.MTGScan.loop($("#scanv"), (r) => { const p = $("#scanprog"), fd = $("#scanfound"); drawQuad(r.quad); if (fd) fd.textContent = (r.found ? "● card found" : "○ looking for the card") + refNote(); if (S.scanMode === "list") { if (p) p.textContent = scTotal() + " cards"; return scListResult(r); } if (p) { const x = tkTotals(); p.textContent = `${x.have} of ${x.want} found`; } return scanResult(r); }, (b) => { if (S.scanMode === "list") { const cl = M.parseCollector(b); return !!(cl.set && cl.cn && (S.setIdx || (S.setIdx = M.indexBySetCn(S.rows))).get(M.fixDigits(cl.set) + "|" + M.cnNum(cl.cn))); } return S.tk && M.matchScan(S.tk.entries, S.tk.st, "", b).kind === "exact"; });
