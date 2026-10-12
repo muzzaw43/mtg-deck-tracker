@@ -734,13 +734,13 @@
   }
   // Check a read printing against the real ones. -> { wait } | { seen, read, how } (corrected / confirmed) | { cands }
   function checkPrint(key, cl) {
-    if (!cl || !cl.set || !cl.cn) return {};
+    if (!cl || !cl.cn) return {};
     const p = printsFor(key);
     if (p === undefined) return { wait: true };
     if (p === "fail") return {};
     const s = M.snapPrint(p, cl);
     if (s.kind === "valid") return { how: "valid" };
-    if (s.kind === "snap") return { seen: { set: s.set, cn: s.cn }, read: `${cl.set} #${cl.cn}`, how: "snap" };
+    if (s.kind === "snap") return { seen: { set: s.set, cn: s.cn }, read: s.setless ? "" : `${cl.set} #${cl.cn}`, how: s.setless ? "setless" : "snap" };
     if (s.kind === "cands") return { cands: s.cands, read: `${cl.set} #${cl.cn}` };
     return { how: "unknown" };
   }
@@ -805,9 +805,12 @@
   function scanResult0(r) {
     const t = S.tk; if (!t || !scanEl) return;
     let m;
+    if (r.visual && r.visual.ok && r.title) { const tm0 = M.matchTitle(t.entries, r.title); if (tm0 && tm0.score >= 0.85 && tm0.key !== r.visual.key) r = Object.assign({}, r, { visual: null }); } // the name says otherwise
     if (r.visual && r.visual.ok) {
       // The picture says which card; the small print (when it was read) says which printing.
-      const ents = t.entries.filter((e) => e.key === r.visual.key), left = (e) => e.qty - (t.st.got[e.id] || 0), cl = M.parseCollector(r.bottom || "");
+      const ents = t.entries.filter((e) => e.key === r.visual.key), left = (e) => e.qty - (t.st.got[e.id] || 0);
+      let cl = M.parseCollector(r.bottom || "");
+      if (cl.cn && !cl.set) { const ck0 = checkPrint(r.visual.key, cl); if (ck0.wait) return; if (ck0.seen) cl = { set: ck0.seen.set, cn: ck0.seen.cn }; }
       const alt = S.altMeta && S.altMeta.get(r.visual.id), learned = /^learn\|/.test(r.visual.id);
       const hit = cl.set && cl.cn ? ents.find((e) => e.set && M.fixDigits(e.set) === M.fixDigits(cl.set) && M.cnNum(e.cn) === M.cnNum(cl.cn) && left(e) > 0) || ents.find((e) => e.set && M.fixDigits(e.set) === M.fixDigits(cl.set) && M.cnNum(e.cn) === M.cnNum(cl.cn)) : null;
       const open = ents.filter((e) => left(e) > 0).sort((a, b) => (r.visual.scores[b.id] || 0) - (r.visual.scores[a.id] || 0));
@@ -819,7 +822,12 @@
       else if (cl.set && cl.cn) m = { kind: "diff", entry: open[0] || ents[0], seen: cl, full: !open.length };
       else m = { kind: "exact", entry: open[0] || ents[0], seen: {}, full: !open.length };
     }
-    else m = M.matchScan(t.entries, t.st, r.title, r.bottom);
+    else {
+      let bt = r.bottom;
+      const cl0 = M.parseCollector(bt || ""), tm1 = cl0.cn && !cl0.set ? M.matchTitle(t.entries, r.title) : null;
+      if (tm1) { const ck1 = checkPrint(tm1.key, cl0); if (ck1.wait) return; if (ck1.seen) bt = `${ck1.seen.cn} C\n${ck1.seen.set} EN`; }
+      m = M.matchScan(t.entries, t.st, r.title, bt);
+    }
     if (m.kind === "diff" && m.entry && !(S.altMeta && r.visual && r.visual.ok && S.altMeta.get(r.visual.id))) {
       const ck = checkPrint(m.entry.key, m.seen);
       if (ck.wait) return;

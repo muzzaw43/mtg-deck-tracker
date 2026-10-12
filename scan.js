@@ -224,6 +224,10 @@
       if (out.visual && out.visual.ok && skipText && skipText(out.visual)) return out; // recognised by its picture: no text needed
     }
     out.bottom = (await ws.bottom.recognize(strip(img, card, 0.03, 0.915, 0.60, 0.985, 900))).data.text;
+    // Older / retro frames have no set code at bottom-left: the number sits at the end of the copyright line, toward the right.
+    try { const pc = window.MTG && window.MTG.parseCollector(out.bottom); if (!pc || !pc.set) out.bottom += "\n" + (await ws.bottom.recognize(strip(img, card, 0.30, 0.915, 0.97, 0.985, 1000))).data.text; } catch (e) { /* ignore */ }
+    // A middling picture match can be a look-alike: read the name too so it can be overruled.
+    if (out.visual && out.visual.ok && out.visual.score < 0.8) { out.title = (await ws.title.recognize(strip(img, card, 0.05, 0.035, 0.80, 0.105, 700))).data.text; return out; }
     if (out.visual && out.visual.ok) return out;
     if (!enough || !enough(out.bottom)) out.title = (await ws.title.recognize(strip(img, card, 0.05, 0.035, 0.80, 0.105, 700))).data.text;
     return out;

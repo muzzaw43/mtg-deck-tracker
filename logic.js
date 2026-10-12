@@ -522,8 +522,12 @@
     let set = "", cn = "";
     const sm = flat.match(/\b([A-Z0-9]{3,5})\s*[•·.\-*★☆✦]+\s*(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/) || flat.match(/\b([A-Z0-9]{3,5})\s+(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/) || flat.match(/\b([A-Z0-9]{3,5})\s+\S{1,2}\s+(EN|JA|DE|FR|ES|IT|PT|RU|KO|ZH[ST]?|PH)\b/);
     if (sm) set = sm[1];
+    const co = flat.match(/COAST\s*[^A-Z0-9\n]*\s*0*(\d{1,4})\b/);
+    if (co && !sm) return { set: "", cn: co[1], star };
+    if (!sm) { const yr = flat.match(/\b(?:19[89]\d|20[0-3]\d)\b[^\d\n]*?\b0*(\d{1,4})\s*$/m); if (yr) return { set: "", cn: yr[1], star }; }
     const nm = flat.match(/(?:^|[^A-Z0-9])0*(\d{1,4})(?:\s*\/\s*\d{1,4})?\s*[CURMLTS★☆*]?(?:[^A-Z0-9]|$)/m);
     if (nm) cn = nm[1];
+    if (!set && /^(19[89]\d|20[0-3]\d)$/.test(cn)) cn = ""; // a copyright year, not a collector number
     return { set, cn, star };
   }
   // OCR often swaps one character (3/5, 1/7...). Among a card's listed printings, find one whose set and number are one character off the read.
@@ -539,7 +543,11 @@
   // Check a read set + number against every real printing of the card (prints = [[set, cn], ...] from Scryfall).
   // valid: it is a real printing. snap: exactly one real printing is a single character away (a misread). cands: several are; none: nothing close.
   function snapPrint(prints, cl) {
-    if (!prints || !prints.length || !cl || !cl.set || !cl.cn) return { kind: "none" };
+    if (!prints || !prints.length || !cl || !cl.cn) return { kind: "none" };
+    if (!cl.set) { // old frames print only the number: the real printings with that number say which set
+      const hit = prints.filter((p) => cnNum(p[1]) === cnNum(cl.cn));
+      return hit.length === 1 ? { kind: "snap", set: String(hit[0][0]).toUpperCase(), cn: hit[0][1], setless: true } : { kind: "none" };
+    }
     const rs = fixDigits(cl.set), rn = cnNum(cl.cn);
     const real = prints.find((p) => fixDigits(String(p[0]).toUpperCase()) === rs && cnNum(p[1]) === rn);
     if (real) return { kind: "valid", set: String(real[0]).toUpperCase(), cn: real[1] };
