@@ -10,11 +10,13 @@
   const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim();
   const isBasic = (n) => BASICS.has(norm(n));
 
+  // site-config.js (loaded first) lets a fork point at its own data repo without touching this file.
+  const SITE = (typeof window !== "undefined" && window.MTG_SITE) || {};
   const DEFAULT_CONFIG = {
-    owner: "muzzaw43",
-    dataRepo: "mtg-deck-data",
-    branch: "main",
-    dbUrl: "https://raw.githubusercontent.com/muzzaw43/mw-data/refs/heads/main/mtg_cards_slim.json",
+    owner: SITE.owner || "muzzaw43",
+    dataRepo: SITE.dataRepo || "mtg-deck-data",
+    branch: SITE.branch || "main",
+    dbUrl: SITE.dbUrl || "https://raw.githubusercontent.com/muzzaw43/mw-data/refs/heads/main/mtg_cards_slim.json",
     // Cards in these binders are free to use / trade.
     freeBinders: ["Not in use", "edge of eternities", "The Hobbit", "Avatar"],
     // Free only for cards held 2+ times in that binder (one copy stays put, rest are free).

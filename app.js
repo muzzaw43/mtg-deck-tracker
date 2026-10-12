@@ -15,7 +15,7 @@
   /* ---------- phone back button: closes pop-ups, then leaves the deck ---------- */
   S.nav = []; S.ignorePop = 0;
   async function forceRefresh() {
-    const files = ["./", "index.html", "style.css", "app.js", "scan.js", "logic.js", "manifest.json"];
+    const files = ["./", "index.html", "style.css", "app.js", "scan.js", "logic.js", "site-config.js", "manifest.json"];
     try { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister())); } catch (e) { /* no SW */ }
     try { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } catch (e) { /* no cache API */ }
     try { await Promise.all(files.map((f) => fetch(f, { cache: "reload" }))); } catch (e) { /* offline */ }

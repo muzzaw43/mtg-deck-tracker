@@ -1,0 +1,163 @@
+# MTG Deck Tracker: set-up and user guide
+
+A free web app that sits alongside **ManaBox**. ManaBox stays your collection; this app helps you keep your physical Commander decks, your swaps and your ManaBox list in step. It runs on GitHub Pages, installs on a phone like an app, and keeps all your data in **your own private GitHub repo**. Nothing is stored on anyone else's server.
+
+> This guide is kept up to date with the app. The **What's new** list at the bottom shows what changed and when. If a step here doesn't match what you see, check that you are on the latest version (see "Getting updates").
+
+---
+
+## Part 1: What you need
+
+- A free **GitHub** account (github.com).
+- The **ManaBox** app with your collection in it, and a way to export a CSV from it.
+- About 20 minutes the first time.
+
+## Part 2: Set up your own copy
+
+### Step 1. Fork the app
+1. Open the app's repository page (the person who sent you this guide has the link: `github.com/muzzaw43/mtg-deck-tracker`).
+2. Click **Fork** (top right) and accept the defaults. You now have your own copy under your account.
+
+### Step 2. Turn on GitHub Pages (this gives you a website)
+1. In *your* fork go to **Settings → Pages**.
+2. Under *Build and deployment* choose **Deploy from a branch**, branch **main**, folder **/ (root)**, then **Save**.
+3. After a minute or two the page shows your site address, which looks like `https://YOUR-NAME.github.io/mtg-deck-tracker/`.
+
+### Step 3. Point the app at your account
+1. In your fork open the file **`site-config.js`** and click the pencil (edit) icon.
+2. Change `owner: "muzzaw43"` to your own GitHub username. Leave the rest unless you name your data repo differently in Step 4 (then change `dataRepo` too).
+3. **Commit changes**. This is the only file you ever need to edit.
+
+### Step 4. Create your private data repo
+This is where your decks and your collection export live. Keep it **private**.
+1. Click **+ → New repository**. Name it **`mtg-deck-data`**, choose **Private**, tick **Add a README**, then **Create**.
+2. In the new repo choose **Add file → Create new file** and make these files (the `/` in a name creates the folder):
+
+   **`config.json`**
+   ```json
+   {
+     "freeBinders": ["Not in use"],
+     "multiCopyBinders": []
+   }
+   ```
+   `freeBinders` lists the ManaBox binders whose cards are free to move into decks or trade. Use the exact binder names from ManaBox.
+
+   **`wishlist.json`**
+   ```json
+   []
+   ```
+
+   **`decks/_example.json`** (files starting with `_` are ignored)
+   ```json
+   {
+     "name": "Example (ignored by the app)",
+     "commander": "Commander Name",
+     "status": "planned",
+     "updated": "2026-01-01",
+     "cards": [{ "name": "Sol Ring", "qty": 1 }],
+     "pencilled": [],
+     "wishlist": []
+   }
+   ```
+
+### Step 5. Add your collection
+1. In ManaBox, export your collection as a CSV (look for the export option in the collection or settings menu; the wording changes between versions).
+2. In your data repo open the `collection` folder (create it by adding a file called `collection/ManaBox_Collection.csv`) and upload the CSV there. Later you can upload new exports from inside the app (Step 8).
+
+### Step 6. Add your decks
+Each deck is one small file in `decks/`, for example `decks/my-first-deck.json`:
+```json
+{
+  "name": "My First Deck",
+  "commander": "Commander Name",
+  "status": "built",
+  "updated": "2026-01-01",
+  "cards": [{ "name": "Commander Name", "qty": 1 }],
+  "pencilled": [],
+  "wishlist": []
+}
+```
+- **`name` must match the ManaBox deck binder name exactly.** If it does, the app reads the real card list from your CSV and you don't have to type the 100 cards.
+- If you have no matching ManaBox deck binder, put the full list in `cards`.
+- `status` can be `built`, `planned` or `retired`.
+
+### Step 7. Make an access token
+The app reads (and optionally writes) your private repo using a token that you paste into the app. It stays in your browser only.
+1. GitHub → your profile picture → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
+2. **Repository access:** *Only select repositories* → pick **`mtg-deck-data`**.
+3. **Permissions → Repository permissions → Contents:** choose **Read and write** if you want to save swaps, wishlist items and CSV uploads from the app. Choose **Read-only** for someone who only needs to look.
+4. Pick an expiry, generate it, and **copy the token now** (GitHub shows it once).
+5. **Never post the token anywhere or send it in a message.** Anyone with it can read (and with write access, change) your data repo.
+
+### Step 8. Open the app
+1. Visit your site address from Step 2.
+2. Open the **Data** tab, paste the token into the token box and save. The decks load.
+3. If you made a read-and-write token, paste it in the *write token* box too (the same token works for both).
+4. To update the collection later: export a fresh CSV from ManaBox and upload it on the **Data** tab. The app checks it before replacing the old one.
+
+### Step 9. Put it on your phone like an app
+- **iPhone (Safari):** Share → **Add to Home Screen**.
+- **Android (Chrome):** menu → **Install app** / **Add to Home screen**.
+- If the app looks out of date after an update, tap the **⟳** button at the top right to refresh it.
+
+### Sharing with a partner or friend
+Give them the site address and a token for the same data repo (read-only to just look, read and write to make swaps). They are asked for a name the first time they save so changes show who made them, and you can review their swaps afterwards. Make a separate token per person so you can revoke one without affecting others.
+
+---
+
+## Part 3: Using it
+
+| Tab | What it's for |
+|---|---|
+| **Decks** | All your decks. Open one to see it as stacks, a grid or a list; press and hold (phone) or hover (desktop) a card for a large image. Pencil in swaps, set role targets, see deck stats, find upgrades, and check the physical deck. Search box at the top: "where is this card?". |
+| **Collection** | Binders like ManaBox, every card with filters (set, colours, colour identity, mana value, type, price), and a **Sets** view showing what you have against what's missing in a whole set. |
+| **Check** | Automatic health checks: deck size, duplicates, colour identity, cards claimed by two decks, swaps that don't match the list. |
+| **Trades** | Spare cards in your free binders after reserving what decks need, with price filters and spare counts by rarity. Export as a ManaBox CSV or text. |
+| **Wishlist** | Cards you want, per deck. |
+| **Data** | Tokens, upload a new CSV, and a log of what loaded. |
+
+### Swaps
+A swap is a card going OUT and a card coming IN. It moves through **pencilled → approved → made → done**. Nothing changes on its own: you decide each step, and "made" means you've physically swapped the cards but ManaBox isn't updated yet. After you update ManaBox and re-upload the CSV, the app recognises it and marks it reflected.
+
+### Upgrade finder
+On a deck, tap **Upgrade finder**. It shows cards you already own, in the deck's colours, that are not locked in another built deck and that fill a role the deck is short on (ramp, card advantage, targeted removal, sweepers). Each has a "Why" line. It only suggests; "Pencil in…" asks which card to cut and adds a pencilled swap.
+
+### Check deck (tick list and camera scanner)
+On a deck, tap **Check deck** to sit down with the physical cards.
+- Choose what to check against: *as it is physically*, *the list in ManaBox*, or *with all confirmed swaps*.
+- Tap a card to tick it off; tap again to cycle back. Filters show what is left to find.
+- **Scan with camera** reads the card's name and the small print at the bottom (set code and collector number) and ticks the exact printing from your list. It warns if the card is the right name but a different printing, and notes a foil star. Hold the card in the frame with good light and steady hands. Foils and old cards (no set code) are the hardest; the name still works for those.
+- Extra cards found in the deck can be added to "not on the list". The result is a *missing and extra* report and a *list of what's physically here*.
+- This **never** adds anything to your ManaBox collection. Ticks are kept in your browser only.
+- The camera needs permission, and the first scan downloads a text-recognition library, so it needs internet that first time.
+
+### Prices
+Values are live Scryfall market prices (USD) converted to AUD. They load quietly in the background; until then (or for cards with no market price) ManaBox's own price from your CSV is used. To show a different currency, change the exchange rate source in `app.js` (`loadLivePrices`) or ask for it to be made a setting.
+
+### Something not right?
+- *"Token rejected" or no decks:* the token expired, or it was not given access to `mtg-deck-data`. Make a new one (Step 7).
+- *A deck is missing:* its file must be in `decks/`, end in `.json`, and not start with `_`.
+- *Deck shows the wrong cards:* the deck `name` has to match the ManaBox deck binder exactly.
+- *Changes don't show after an update:* tap **⟳**, or close and reopen the app.
+- *Saving fails:* your token is read-only. Make a read and write token (Step 7).
+
+---
+
+## Getting updates
+Your fork keeps working as it is. To receive improvements: on your fork's front page click **Sync fork → Update branch**. Because your settings live only in `site-config.js`, updates do not overwrite them. Then tap **⟳** in the app.
+
+## Privacy
+- Your collection and decks live in your private repo only.
+- The token is stored in your browser only.
+- The app fetches card text from a public card database file, card images and set lists from Scryfall, and exchange rates from frankfurter.app, all from your own device.
+
+---
+
+## What's new
+Newest first. Each time the app gains a feature this list and the sections above are updated.
+
+- **Check deck:** tick list for a physical deck plus a camera scanner that reads the name and the set/number line.
+- **Live prices** (Scryfall, converted to AUD), loaded in the background; upgrade finder now shows card images with a reason for each suggestion.
+- **Upgrade finder, "where is this card?", values in AUD, stale-data warning, add to wishlist from a card, and an illegal-card info check.**
+- **Settings in one place:** `site-config.js` replaces editing app code for forks.
+- Collection tab with binders, filters, sets checklist and card rulings; swap comments and review queue; install-as-app on phones; trade controls (price filter, spares by rarity); back-button confirm and refresh button.
