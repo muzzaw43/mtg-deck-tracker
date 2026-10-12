@@ -192,7 +192,7 @@
     return { x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch, fx: (w - cw) / 2 / w, fy: (h - ch) / 2 / h, fw: cw / w, fh: ch / h };
   }
   // Bottom-left small print first (it identifies the exact printing); the title is only read when that wasn't enough.
-  let candIds = null, skipText = null; // candidates worth matching (the deck's list); skipText(visual) says when no text needs reading
+  let lastCanvas = null, candIds = null, skipText = null; // candidates worth matching (the deck's list); skipText(visual) says when no text needs reading
   async function readFrame(src, w, h, enough) {
     const ws = await init();
     let card = cardRect(w, h), img = src, found = false, quad = null;
@@ -205,7 +205,7 @@
             const c2 = document.createElement("canvas"); c2.width = 240; c2.height = Math.round(240 / RATIO);
             c2.getContext("2d").drawImage(img, OW * mg, OH * mg, OW * (1 - 2 * mg), OH * (1 - 2 * mg), 0, 0, c2.width, c2.height);
             const v = visualMatch(c2, candIds);
-            if (v && (!out.visual || v.score > out.visual.score)) { out.visual = v; if (mg) card = { x: OW * mg, y: OH * mg, w: OW * (1 - 2 * mg), h: OH * (1 - 2 * mg) }; else card = { x: 0, y: 0, w: OW, h: OH }; }
+            if (v && (!out.visual || v.score > out.visual.score)) { out.visual = v; lastCanvas = c2; if (mg) card = { x: OW * mg, y: OH * mg, w: OW * (1 - 2 * mg), h: OH * (1 - 2 * mg) }; else card = { x: 0, y: 0, w: OW, h: OH }; }
           }
         }
         if (!out.visual || !out.visual.ok) { // no outline, or it didn't look like a deck card: try the guide frame a little bigger, smaller and shifted
@@ -215,11 +215,12 @@
             const cw = g0.w * sc, ch = g0.h * sc, cx = g0.x + g0.w / 2 + dx * g0.w - cw / 2, cy = g0.y + g0.h / 2 + dy * g0.h - ch / 2;
             g2.drawImage(src, cx, cy, cw, ch, 0, 0, vc.width, vc.height);
             const v = visualMatch(vc, candIds);
-            if (v && (!bestG || v.score > bestG.v.score)) bestG = { v, rect: { x: cx, y: cy, w: cw, h: ch } };
+            if (v && (!bestG || v.score > bestG.v.score)) bestG = { v, rect: { x: cx, y: cy, w: cw, h: ch }, canvas: sc === 1 && dx === 0 && dy === 0 ? (() => { const k = document.createElement("canvas"); k.width = vc.width; k.height = vc.height; k.getContext("2d").drawImage(vc, 0, 0); return k; })() : null };
           }
-          if (bestG && (!out.visual || bestG.v.score > out.visual.score)) { out.visual = bestG.v; img = src; card = bestG.rect; }
+          if (bestG && (!out.visual || bestG.v.score > out.visual.score)) { out.visual = bestG.v; img = src; card = bestG.rect; if (bestG.canvas) lastCanvas = bestG.canvas; }
         }
       } catch (e) { /* ignore */ }
+      if (!found && (!lastCanvas || !(out.visual && out.visual.ok))) { const k = document.createElement("canvas"), g0 = cardRect(w, h); k.width = 160; k.height = Math.round(160 / RATIO); k.getContext("2d").drawImage(src, g0.x, g0.y, g0.w, g0.h, 0, 0, k.width, k.height); lastCanvas = k; }
       if (out.visual && out.visual.ok && skipText && skipText(out.visual)) return out; // recognised by its picture: no text needed
     }
     out.bottom = (await ws.bottom.recognize(strip(img, card, 0.03, 0.915, 0.60, 0.985, 900))).data.text;
@@ -244,5 +245,11 @@
     tick();
   }
   function stop() { running = false; if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; } }
-  window.MTGScan = { setRefs, setCandidates: (c, sk) => { candIds = c; skipText = sk || null; }, refState: () => refState, start, loop, stop, readFrame, cardRect, init, RATIO };
+  function learn(id, key) {
+    if (!lastCanvas) return false;
+    refs.set(id, desc(lastCanvas, false));
+    if (candIds) candIds.push({ id, key });
+    return true;
+  }
+  window.MTGScan = { learn, setRefs, setCandidates: (c, sk) => { candIds = c; skipText = sk || null; }, refState: () => refState, start, loop, stop, readFrame, cardRect, init, RATIO };
 })();

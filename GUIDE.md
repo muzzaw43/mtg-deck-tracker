@@ -170,6 +170,7 @@ GitHub pauses scheduled jobs in a repository nothing has happened in for about t
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Alternate art:** the scanner also learns every printing of the deck's cards that you own (so a showcase or borderless copy sitting in another binder is recognised and noted as a different printing). If it still can't recognise a card, tap **Pick the card…**, type the name, and it counts the card and learns how that one looks for the rest of the check.
 - **Ding:** each counted card plays a short ding (and a tiny vibration where the phone allows it). The 🔔 in the scanner bar mutes it.
 - **Corrections and sleeves:** a misread number one character off a listed printing (e.g. 257 for 237) is taken as the listed one, with a "No, it really is…" button; every result has **Wrong printing?** and every "found as…" note has a **✕**. Sleeved cards are matched with and without the sleeve margin, and if no outline is found it tries the guide frame at a few sizes and offsets. Dark sleeves on a dark surface are hardest: hold them against something light.
 - **Scanner keeps the last result on screen** until the next card needs attention, and **tapping the screen scans another copy of the same card** (like ManaBox).
