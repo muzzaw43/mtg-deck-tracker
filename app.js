@@ -122,6 +122,7 @@
         return d;
       }));
       try { S.wl = JSON.parse(await gh("wishlist.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.wl = []; }
+      try { S.landplan = JSON.parse(await gh("landplan.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.landplan = null; }
       const csvs = (await ghList("collection")).filter((f) => f.type === "file" && /\.csv$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name));
       let text = "", name = "";
       if (csvs.length) { const fixed = csvs.find((f) => f.name === "ManaBox_Collection.csv"); name = (fixed || csvs[csvs.length - 1]).name; text = await gh("collection/" + name, true); }
@@ -1364,7 +1365,8 @@
   const tidyLoad = (k) => { try { const v = JSON.parse(localStorage.getItem(k)); return Array.isArray(v) ? v : null; } catch (e) { return null; } };
   function tidyBoard() {
     const T = S.tidy, hs = M.basicHolders(S.rows, T.name), allDecks = hs.filter((x) => x.isDeck), allFree = hs.filter((x) => !x.isDeck);
-    if (!T.sel) T.sel = tidyLoad("mtg_tidysel") || allDecks.filter((x) => x.prints.length > 1).map((x) => x.binder);
+    const savedFor = (nm, b) => { const pl = S.landplan && S.landplan.plans && S.landplan.plans[nm]; return pl && pl[b] ? pl[b] : null; };
+    if (!T.sel) T.sel = tidyLoad("mtg_tidysel") || allDecks.filter((x) => x.prints.length > 1 || savedFor(T.name, x.binder)).map((x) => x.binder);
     if (!T.exf) T.exf = tidyLoad("mtg_tidyx") || [];
     const sel = new Set(T.sel), exf = new Set(T.exf);
     const decks = allDecks.filter((x) => sel.has(x.binder)), free = allFree.filter((x) => !exf.has(x.binder));
@@ -1372,7 +1374,7 @@
     for (const x of [...decks, ...free]) for (const p of x.prints) { const e = pr.get(p.pk) || { p, qty: 0, free: 0, src: [] }; e.qty += p.qty; if (!x.isDeck) e.free += p.qty; e.src.push({ b: x.binder, n: p.qty, deck: x.isDeck }); pr.set(p.pk, e); }
     const prints = [...pr.values()].sort((a, b) => String(a.p.set).localeCompare(String(b.p.set)) || (parseInt(a.p.cn, 10) || 0) - (parseInt(b.p.cn, 10) || 0) || String(a.p.cn).localeCompare(String(b.p.cn)) || a.p.foil - b.p.foil);
     T.want = T.want || {};
-    const wantOf = (x) => { const k = T.name + "|" + x.binder; if (!T.want[k]) { T.want[k] = {}; for (const p of x.prints) T.want[k][p.pk] = p.qty; } return T.want[k]; };
+    const wantOf = (x) => { const k = T.name + "|" + x.binder; if (!T.want[k]) { T.want[k] = {}; for (const p of x.prints) T.want[k][p.pk] = p.qty; const sv = savedFor(T.name, x.binder), known = new Set(hs.flatMap((y) => y.prints.map((p) => p.pk))); if (sv) { if (Object.values(sv).reduce((a, n) => a + n, 0) === x.total && Object.keys(sv).every((pk) => known.has(pk))) T.want[k] = { ...sv }; else T.stale = (T.stale || []).concat(x.binder); } } return T.want[k]; };
     const rows = decks.map((x) => { const w = wantOf(x); return { x, w, cur: Object.fromEntries(x.prints.map((p) => [p.pk, p.qty])), got: Object.values(w).reduce((s2, n) => s2 + n, 0) }; });
     for (const e of prints) e.used = rows.reduce((s2, r) => s2 + (r.w[e.p.pk] || 0), 0);
     return { hs, allDecks, allFree, decks, free, prints, rows };
@@ -1395,8 +1397,34 @@
         ${B.rows.map((r) => { const w = r.w[p.pk] || 0, c = r.cur[p.pk] || 0, d = esc(r.x.binder), k = esc(p.pk); return `<div class="lrow"><span class="n">${d}</span><span class="muted">now ${c}</span><button class="btn alt" data-act="lw" data-d="${d}" data-pk="${k}" data-v="-1">−</button><b class="lnum${w !== c ? " chg" : ""}">${w}</b><button class="btn alt" data-act="lw" data-d="${d}" data-pk="${k}" data-v="1">+</button><button class="btn alt" data-act="lw" data-d="${d}" data-pk="${k}" data-v="fill">Fill</button></div>`; }).join("")}</div>`;
     }).join("");
     const plan = tidyMoves(B);
-    h += `<h3>Changes to make</h3>` + (plan.length ? `<div class="card">${plan.map((l) => `<div class="cardrow"><div class="t"><span class="n">${esc(l)}</span></div></div>`).join("")}<div class="row" style="margin-top:6px"><button class="btn" data-act="tidytext">Show as a list</button><button class="btn alt" data-act="tidyreset">Start again</button></div></div>` : `<div class="muted">Nothing changed yet. Nothing is saved here either way.</div>`);
+    h += `<h3>Changes to make</h3>` + (plan.length ? `<div class="card">${plan.map((l) => `<div class="cardrow"><div class="t"><span class="n">${esc(l)}</span></div></div>`).join("")}<div class="row" style="margin-top:6px"><button class="btn" data-act="tidytext">Show as a list</button></div></div>` : `<div class="muted">No changes planned for the ticked decks.</div>`);
+    const dirty = T.touched && T.touched.size, sp = S.landplan;
+    h += `<div class="card ${dirty ? "lvl-warn" : ""}"><b>Saved plan</b><div class="muted">${sp && sp.updated ? "Last saved " + esc(sp.updated) + (sp.by ? " by " + esc(sp.by) : "") + ". Opens on any device." : "Nothing saved yet."}${dirty ? ` <b>You have unsaved changes (${T.touched.size} deck${T.touched.size > 1 ? "s" : ""}).</b>` : ""}${T.stale && T.stale.length ? ` Ignored saved plan for ${esc([...new Set(T.stale)].join(", "))}: it no longer matches your collection.` : ""}${T.savemsg ? " " + esc(T.savemsg) : ""}</div><div class="row">${S.wtoken ? `<button class="btn" data-act="tidysave" ${dirty ? "" : "disabled"}>Save plan</button>` : `<span class="muted">Add a write token in Data to save.</span>`}<button class="btn alt" data-act="tidyreset" ${dirty ? "" : "disabled"}>Undo my changes</button><button class="btn alt" data-act="tidyclear">Clear ${esc(T.name)} plan</button></div></div>`;
     return h;
+  }
+  async function tidySavePlan() {
+    const T = S.tidy; if (!S.wtoken) { T.savemsg = "Saving needs a write token (Data tab)."; render(); return; }
+    T.savemsg = "Saving…"; render();
+    const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/landplan.json`, hd = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
+    try {
+      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: hd });
+      let data = { plans: {} }, sha;
+      if (cur.ok) { const j = await cur.json(); sha = j.sha; data = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(j.content.replace(/\s/g, "")), (c) => c.charCodeAt(0)))); }
+      else if (cur.status !== 404) throw new Error("Couldn't read the saved plan (" + cur.status + ").");
+      data.plans = data.plans || {};
+      for (const k of T.touched || []) {
+        const i = k.indexOf("|"), nm = k.slice(0, i), b = k.slice(i + 1), w = T.want[k], hold = M.basicHolders(S.rows, nm).find((x) => x.binder === b);
+        if (!hold || !w) continue;
+        const same = hold.prints.every((p) => (w[p.pk] || 0) === p.qty) && Object.keys(w).every((pk) => !w[pk] || hold.prints.some((p) => p.pk === pk));
+        if (same) { if (data.plans[nm]) { delete data.plans[nm][b]; if (!Object.keys(data.plans[nm]).length) delete data.plans[nm]; } }
+        else { data.plans[nm] = data.plans[nm] || {}; data.plans[nm][b] = Object.fromEntries(Object.entries(w).filter(([, n]) => n > 0)); }
+      }
+      data.updated = new Date().toISOString().slice(0, 10); data.by = S.who || "";
+      const r = await fetch(url, { method: "PUT", headers: hd, body: JSON.stringify({ message: `Land plan saved${S.who ? " [" + S.who + "]" : ""}`, content: b64(JSON.stringify(data, null, 1) + "\n"), sha, branch: S.cfg.branch }) });
+      if (!r.ok) throw new Error("GitHub " + r.status);
+      S.landplan = data; T.touched = new Set(); T.stale = []; T.savemsg = "Saved.";
+    } catch (e) { T.savemsg = "Save failed: " + e.message; }
+    render();
   }
   function tidyMoves(B) {
     const L = (p) => `${p.set} #${p.cn}${p.foil ? " (foil)" : ""}`, out = [], net = new Map();
@@ -1696,10 +1724,13 @@
     else if (a === "upgpick") { openModalNav(); S.ch = { mode: "out", slug: el.dataset.slug, i: null, q: "", pendIn: el.dataset.key }; render(); }
     else if (a === "tidyname") { S.tidy = S.tidy || {}; S.tidy.name = el.dataset.n; S.tidy.msg = ""; render(); }
     else if (a === "tidypick") { const B = tidyBoard(), m = el.dataset.m; S.tidy.sel = m === "all" ? B.allDecks.map((x) => x.binder) : m === "mixed" ? B.allDecks.filter((x) => x.prints.length > 1).map((x) => x.binder) : []; tidySave("mtg_tidysel", S.tidy.sel); render(); }
-    else if (a === "tidyreset") { S.tidy.want = {}; render(); }
+    else if (a === "tidyreset") { S.tidy.want = {}; S.tidy.touched = new Set(); S.tidy.stale = []; S.tidy.msg = ""; render(); }
+    else if (a === "tidyclear") { const B = tidyBoard(); S.tidy.touched = S.tidy.touched || new Set(); for (const r of B.rows) { S.tidy.want[S.tidy.name + "|" + r.x.binder] = { ...r.cur }; S.tidy.touched.add(S.tidy.name + "|" + r.x.binder); } render(); }
+    else if (a === "tidysave") { tidySavePlan(); }
     else if (a === "lw") {
       const B = tidyBoard(), r = B.rows.find((x) => x.x.binder === el.dataset.d), e = B.prints.find((x) => x.p.pk === el.dataset.pk), v = el.dataset.v;
       if (r && e) {
+        S.tidy.touched = S.tidy.touched || new Set(); S.tidy.touched.add(S.tidy.name + "|" + r.x.binder);
         const pk = e.p.pk, w = r.w, others = e.used - (w[pk] || 0), poolLeft = e.qty - others;
         if (v === "fill") {
           w[pk] = Math.max(0, Math.min(r.x.total, poolLeft));
