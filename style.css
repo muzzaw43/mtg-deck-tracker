@@ -161,3 +161,5 @@ tr.flag td{background:rgba(230,180,80,.16)}
 .lrow .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lrow .btn{min-width:40px;padding:8px 10px}
 .lnum{min-width:22px;text-align:center;font-size:16px}.lnum.chg{color:#4ade80}
+.lpr .lph .ptile{width:110px}.lpr .lph .ptile img{height:auto;aspect-ratio:488/680;object-fit:contain;background:#111}
+.ptile .pcap{padding:2px 4px;text-align:center}
