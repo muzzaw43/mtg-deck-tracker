@@ -1369,8 +1369,8 @@
     const sel = new Set(T.sel), exf = new Set(T.exf);
     const decks = allDecks.filter((x) => sel.has(x.binder)), free = allFree.filter((x) => !exf.has(x.binder));
     const pr = new Map();
-    for (const x of [...decks, ...free]) for (const p of x.prints) { const e = pr.get(p.pk) || { p, qty: 0, free: 0 }; e.qty += p.qty; if (!x.isDeck) e.free += p.qty; pr.set(p.pk, e); }
-    const prints = [...pr.values()].sort((a, b) => b.qty - a.qty || b.free - a.free);
+    for (const x of [...decks, ...free]) for (const p of x.prints) { const e = pr.get(p.pk) || { p, qty: 0, free: 0, src: [] }; e.qty += p.qty; if (!x.isDeck) e.free += p.qty; e.src.push({ b: x.binder, n: p.qty, deck: x.isDeck }); pr.set(p.pk, e); }
+    const prints = [...pr.values()].sort((a, b) => String(a.p.set).localeCompare(String(b.p.set)) || (parseInt(a.p.cn, 10) || 0) - (parseInt(b.p.cn, 10) || 0) || String(a.p.cn).localeCompare(String(b.p.cn)) || a.p.foil - b.p.foil);
     T.want = T.want || {};
     const wantOf = (x) => { const k = T.name + "|" + x.binder; if (!T.want[k]) { T.want[k] = {}; for (const p of x.prints) T.want[k][p.pk] = p.qty; } return T.want[k]; };
     const rows = decks.map((x) => { const w = wantOf(x); return { x, w, cur: Object.fromEntries(x.prints.map((p) => [p.pk, p.qty])), got: Object.values(w).reduce((s2, n) => s2 + n, 0) }; });
@@ -1391,7 +1391,7 @@
     h += `<h3>${esc(T.name)}: assign</h3>${T.msg ? `<div class="card lvl-warn">${esc(T.msg)}</div>` : ""}<div class="row">${B.rows.map((r) => `<span class="pill ${r.got === r.x.total ? "ok" : "warn"}">${esc(r.x.binder)} ${r.got}/${r.x.total}</span>`).join(" ")}</div>`;
     h += B.prints.map((e) => {
       const left = e.qty - e.used, p = e.p;
-      return `<div class="card lpr"><div class="lph"><div class="ptile">${p.sid ? `<img loading="lazy" alt="${esc(p.set)} #${esc(p.cn)}" src="${esc(M.artUrl(p.sid, "normal"))}" data-fb="${esc(M.artByName(T.name, "normal"))}">` : `<div class="pnoimg">no image</div>`}<div class="pcap">${lbl(p)}</div></div><div><b>${lbl(p)}</b><div class="muted">${esc(p.setName || "")}</div><div class="muted">${e.qty} here (${e.free} spare)</div><span class="pill ${left > 0 ? "ok" : "warn"}">${left} left over</span></div></div>
+      return `<div class="card lpr"><div class="lph"><div class="ptile">${p.sid ? `<img loading="lazy" alt="${esc(p.set)} #${esc(p.cn)}" src="${esc(M.artUrl(p.sid, "normal"))}" data-fb="${esc(M.artByName(T.name, "normal"))}">` : `<div class="pnoimg">no image</div>`}${p.foil ? `<span class="ftag">FOIL</span>` : ""}<div class="pcap">${esc(p.set)} #${esc(p.cn)}</div></div><div><b>${lbl(p)}</b>${p.foil ? ` <span class="pill warn">foil</span>` : ""}<div class="muted">${esc(p.setName || "")}</div><div class="muted">${e.qty} in total · ${e.free} spare</div><div class="muted src">${e.src.map((x) => `${esc(x.b)}${x.deck ? " (deck)" : ""} ×${x.n}`).join(", ")}</div><span class="pill ${left > 0 ? "ok" : "warn"}">${left} left over</span></div></div>
         ${B.rows.map((r) => { const w = r.w[p.pk] || 0, c = r.cur[p.pk] || 0, d = esc(r.x.binder), k = esc(p.pk); return `<div class="lrow"><span class="n">${d}</span><span class="muted">now ${c}</span><button class="btn alt" data-act="lw" data-d="${d}" data-pk="${k}" data-v="-1">−</button><b class="lnum${w !== c ? " chg" : ""}">${w}</b><button class="btn alt" data-act="lw" data-d="${d}" data-pk="${k}" data-v="1">+</button><button class="btn alt" data-act="lw" data-d="${d}" data-pk="${k}" data-v="fill">Fill</button></div>`; }).join("")}</div>`;
     }).join("");
     const plan = tidyMoves(B);
