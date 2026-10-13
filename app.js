@@ -218,7 +218,11 @@
       const ex = files.find((f) => f.name === "ManaBox_Collection.csv");
       const pr = await fetch(base + CSV_PATH, { method: "PUT", headers: H, body: JSON.stringify({
         message: `Collection update: ${file.name} (${rows.length} rows)${S.who ? " [" + S.who + "]" : ""}`, content: b64(text), sha: ex ? ex.sha : undefined, branch: S.cfg.branch }) });
-      if (!pr.ok) throw new Error("Upload failed: GitHub " + pr.status);
+      if (!pr.ok) {
+        let why = ""; try { why = ((await pr.json()).message || "").slice(0, 160); } catch (e) { /* none */ }
+        const hint = pr.status === 403 || pr.status === 401 ? " This device's write token is probably read-only, expired, or not allowed to write to " + S.cfg.dataRepo + " (it needs Contents: Read and write). Check it in Data." : pr.status === 409 || pr.status === 422 ? " The file changed on GitHub meanwhile; reload and try again." : "";
+        throw new Error("Upload failed: GitHub " + pr.status + (why ? " (" + why + ")" : "") + "." + hint);
+      }
       S.rows = rows; S.csvName = "ManaBox_Collection.csv"; S.csvAt = new Date().toISOString();
       S.log.push(`Uploaded ${file.name}: ${rows.length} rows (was ${oldN})`);
       S.saving = ""; recompute(); S.tab = "data"; S.deck = null; resetNav();
