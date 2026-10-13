@@ -1181,6 +1181,14 @@
     const qty = fl.reduce((s, e) => s + e.qty, 0);
     let h = `<div class="muted" style="margin:6px 0">${fl.length} of ${all.length} printings · ${qty} cards${f.binder ? ` · in <b>${esc(f.binder)}</b>` : ""}</div>`;
     if (!fl.length) return h + `<div class="card">Nothing matches those filters.</div>`;
+    if (f.foil === "spare") {
+      const usedBy = new Map();
+      for (const r of S.rows) if (/deck/i.test(r.btype || "") && !/foil|etched/i.test(r.foil || "")) { const k = M.keyOf(S.idx, r.name); const a = usedBy.get(k) || []; if (!a.includes(r.binder)) a.push(r.binder); usedBy.set(k, a); }
+      h += `<div class="muted">Foil copies sitting in a binder, not in a deck. A pill shows where a deck uses a non-foil copy of the same card, so you could swap it for the foil.</div>`;
+      h += shown.map((e) => { const dk = usedBy.get(e.key) || [], fb = [...e.binders.keys()].filter((b) => !S.rows.some((r) => r.binder === b && /deck/i.test(r.btype || ""))); return `<div class="cardrow" data-act="zoom" data-key="${esc(e.key)}" data-sid="${esc(e.sid)}" data-peek="${esc(e.key)}"><div class="t"><span class="n"><img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(e.sid) || M.artByName(e.name))}">${e.freeQty > 1 ? e.freeQty + "× " : ""}${esc(e.name)} <span class="muted tkp">${esc(e.set)} #${esc(e.cn)} · ${esc(e.foil)}${fb.length ? " · in " + esc(fb.join(", ")) : ""}</span></span>${dk.length ? `<span class="pill todo">non-foil in ${esc(dk.join(", "))}</span>` : ""}</div></div>`; }).join("");
+      if (fl.length > shown.length) h += `<button class="btn" data-act="colmore">Show ${Math.min(120, fl.length - shown.length)} more</button>`;
+      return h;
+    }
     if (f.layout === "list") {
       h += shown.map((e) => `<div class="cardrow" data-act="zoom" data-key="${esc(e.key)}" data-sid="${esc(e.sid)}" data-peek="${esc(e.key)}"><div class="t"><span class="n"><img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(e.sid) || M.artByName(e.name))}">${e.qty > 1 ? e.qty + "× " : ""}${esc(e.name)}</span><span class="muted">${esc(e.cost)}</span></div><div class="muted">${esc(e.type)} · ${esc(e.setName)} (${esc(e.set)}) #${esc(e.cn)}${e.rarity ? " · " + esc(e.rarity) : ""}${e.foil ? " · " + esc(e.foil) : ""}${e.price != null ? " · $" + e.price.toFixed(2) : ""}</div></div>`).join("");
     } else {
@@ -1301,8 +1309,9 @@
     const f = CF(), all = colEntries();
     const chip = (fld, v, label, on) => `<button data-act="colchip" data-f="${fld}" data-v="${esc(v)}" class="${on ? "on" : ""}">${label}</button>`;
     const pipb = (fld, c, on) => chip(fld, c, `<span class="pip pip-${c}">${c}</span>`, on);
-    let h = `<h2>Collection</h2><div class="chips vt"><button data-act="colview" data-v="binders" class="${f.view === "binders" ? "on" : ""}">Binders</button><button data-act="colview" data-v="cards" class="${f.view === "cards" ? "on" : ""}">All cards</button><button data-act="colview" data-v="sets" class="${f.view === "sets" ? "on" : ""}">Sets</button></div>`;
+    let h = `<h2>Collection</h2><div class="chips vt"><button data-act="colview" data-v="binders" class="${f.view === "binders" ? "on" : ""}">Binders</button><button data-act="colview" data-v="cards" class="${f.view === "cards" ? "on" : ""}">All cards</button><button data-act="colview" data-v="sets" class="${f.view === "sets" ? "on" : ""}">Sets</button><button data-act="colview" data-v="tidy" class="${f.view === "tidy" ? "on" : ""}">Land tidy</button></div>`;
     if (f.view === "sets") return h + vSets();
+    if (f.view === "tidy") return h + vTidy();
     if (f.view === "binders") {
       const bs = M.binderSummary(S.rows);
       h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders, worth about $${bs.reduce((s, b) => s + b.value, 0).toFixed(0)} AUD (${S.live ? "live market prices from Scryfall, converted to AUD" : "the prices ManaBox holds, until live prices load"}). Tap a binder to look inside.${S.csvName ? ` Collection updated ${esc(csvDate() || S.csvName)}.` : ""}</div></div>`;
@@ -1330,7 +1339,7 @@
         <div class="muted">Rarity</div><div class="chips">${["common", "uncommon", "rare", "mythic"].map((t) => chip("rarity", t, t, f.rarity.has(t))).join("")}</div>
         <div class="row"><select data-cf="set"><option value="">Any set</option>${sets.map(([c, nm]) => `<option value="${esc(c)}" ${f.set === c ? "selected" : ""}>${esc(nm)} (${esc(c)})</option>`).join("")}</select>
         <select data-cf="binder"><option value="">Any binder</option>${binders.map((b) => `<option value="${esc(b)}" ${f.binder === b ? "selected" : ""}>${esc(b)}</option>`).join("")}</select>
-        <select data-cf="foil"><option value="">Foil or not</option><option value="foil" ${f.foil === "foil" ? "selected" : ""}>Foil only</option><option value="nonfoil" ${f.foil === "nonfoil" ? "selected" : ""}>Non-foil only</option></select></div>
+        <select data-cf="foil"><option value="">Foil or not</option><option value="foil" ${f.foil === "foil" ? "selected" : ""}>Foil only</option><option value="nonfoil" ${f.foil === "nonfoil" ? "selected" : ""}>Non-foil only</option><option value="spare" ${f.foil === "spare" ? "selected" : ""}>Foil, not in a deck</option></select></div>
         <div><button class="btn alt" data-act="colclear">Clear all filters</button></div></div>`;
     } else if (f.binder) h += `<div class="chips"><button class="on" data-act="colunbinder">Binder: ${esc(f.binder)} ✕</button></div>`;
     h += `<div class="row"><span><select data-cf="sort">${[["name", "Name"], ["mv", "Mana value"], ["color", "Colour"], ["type", "Type"], ["set", "Set"], ["rarity", "Rarity"], ["qty", "Quantity"], ["price", "Price"]].map(([v, t]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>Sort: ${t}</option>`).join("")}</select> <button class="btn alt" data-act="coldir">${["name", "color", "type", "set"].includes(f.sort) ? (f.dir > 0 ? "A→Z ↑" : "Z→A ↓") : (f.dir > 0 ? "low→high ↑" : "high→low ↓")}</button></span>
@@ -1340,6 +1349,37 @@
 
   function issueHtml(i) {
     return `<div class="card lvl-${i.level}"><div class="row"><span>${i.card ? `<b>${esc(i.card)}</b> — ` : ""}${esc(i.msg)}</span></div>${i.deckName ? `<div class="muted">${esc(i.deckName)}</div>` : ""}</div>`;
+  }
+  /* ---------- Land tidy: which printings of each basic every deck uses ---------- */
+  function vTidy() {
+    const names = M.basicNames(S.rows), T = S.tidy = S.tidy || { name: "", deck: "", target: "" };
+    if (!names.length) return `<div class="card muted">No basic lands in the collection.</div>`;
+    if (!names.includes(T.name)) T.name = names.includes("Plains") ? "Plains" : names[0];
+    const hs = M.basicHolders(S.rows, T.name), decks = hs.filter((x) => x.isDeck), free = hs.filter((x) => !x.isDeck);
+    const lbl = (p) => `${esc(p.set)} #${esc(p.cn)}${p.foil ? " ★" : ""}`;
+    let h = `<div class="muted">Which printings of each basic land every deck uses, to help make each deck consistent. This only reads your collection; nothing is changed. Red means a deck mixes printings.</div>
+      <div class="chips vt">${names.map((n) => `<button data-act="tidyname" data-n="${esc(n)}" class="${T.name === n ? "on" : ""}">${esc(n)}</button>`).join("")}</div>`;
+    h += `<h3>${esc(T.name)} in decks</h3>` + (decks.length ? decks.map((x) => `<div class="cardrow"><div class="t"><span class="n">${esc(x.binder)}</span><span>${x.prints.length > 1 ? `<span class="pill err">${x.prints.length} printings</span> ` : ""}${x.prints.map((p) => `${p.qty}× ${lbl(p)}`).join(" · ")}</span></div></div>`).join("") : `<div class="muted">None.</div>`);
+    h += `<h3>${esc(T.name)} not in decks</h3>` + (free.length ? free.map((x) => `<div class="cardrow"><div class="t"><span class="n">${esc(x.binder)}</span><span>${x.prints.map((p) => `${p.qty}× ${lbl(p)}`).join(" · ")}</span></div></div>`).join("") : `<div class="muted">None.</div>`);
+    const mixed = decks.filter((x) => x.prints.length > 1);
+    h += `<h3>Make one deck uniform</h3><div class="card"><div class="row"><select data-tidy="deck"><option value="">Choose a deck…</option>${decks.map((x) => `<option value="${esc(x.binder)}" ${T.deck === x.binder ? "selected" : ""}>${esc(x.binder)}${x.prints.length > 1 ? " (mixed)" : ""}</option>`).join("")}</select></div>`;
+    const dk = decks.find((x) => x.binder === T.deck);
+    if (dk) {
+      const all = new Map(); for (const x of hs) for (const p of x.prints) { const a = all.get(p.pk) || { p, here: 0, free: 0, other: 0 }; if (x.binder === dk.binder) a.here += p.qty; else if (x.isDeck) a.other += p.qty; else a.free += p.qty; all.set(p.pk, a); }
+      if (!all.has(T.target)) T.target = dk.prints[0].pk;
+      h += `<div class="muted" style="margin-top:6px">Make every ${esc(T.name)} in ${esc(dk.binder)} this printing:</div><select data-tidy="target">${[...all.values()].sort((a, b) => b.here - a.here || b.free - a.free).map((a) => `<option value="${esc(a.p.pk)}" ${T.target === a.p.pk ? "selected" : ""}>${lbl(a.p)} · ${a.here} here · ${a.free} in binders · ${a.other} in other decks</option>`).join("")}</select>`;
+      const plan = M.tidyPlan(hs, dk.binder, T.target);
+      if (!plan.need) h += `<div class="pill ok" style="margin-top:6px">Already uniform: all ${dk.total} are this printing.</div>`;
+      else {
+        h += `<div style="margin-top:6px"><b>${plan.need}</b> of ${dk.total} need changing${plan.short ? ` · <span class="pill warn">${plan.short} short</span>` : ` · <span class="pill ok">all available</span>`}</div>`;
+        h += plan.moves.map((m) => `<div class="cardrow"><div class="t"><span class="n">${m.qty}× ${esc(T.name)}: swap ${lbl(m.give)} for ${lbl(m.get)}</span><span class="muted">with “${esc(m.binder)}”</span></div></div>`).join("");
+        if (plan.short) h += `<div class="muted">${plan.short} more of this printing ${plan.elsewhere.length ? "are in other decks: " + plan.elsewhere.map((e) => esc(e.binder) + " ×" + e.qty).join(", ") + ". Moving those would change that deck." : "aren't free anywhere. Pick a printing you have more of, or look for spares."}</div>`;
+        h += `<div class="row" style="margin-top:6px"><button class="btn" data-act="tidytext">Show as a list</button></div>`;
+      }
+    }
+    h += `</div>`;
+    if (mixed.length) h += `<div class="muted">${mixed.length} deck${mixed.length > 1 ? "s mix" : " mixes"} ${esc(T.name)} printings.</div>`;
+    return h;
   }
   function vCheck() {
     if (!S.decks.length) return emptyMsg("Load decks first.");
@@ -1621,6 +1661,13 @@
     else if (a === "upgrole") { S.upgRole = el.dataset.r; S.upgLimit = 25; render(); }
     else if (a === "upgmore") { S.upgLimit = (S.upgLimit || 25) + 25; render(); }
     else if (a === "upgpick") { openModalNav(); S.ch = { mode: "out", slug: el.dataset.slug, i: null, q: "", pendIn: el.dataset.key }; render(); }
+    else if (a === "tidyname") { S.tidy = S.tidy || {}; S.tidy.name = el.dataset.n; S.tidy.deck = ""; S.tidy.target = ""; render(); }
+    else if (a === "tidytext") {
+      const T = S.tidy, hs = M.basicHolders(S.rows, T.name), plan = M.tidyPlan(hs, T.deck, T.target), p0 = hs.flatMap((x) => x.prints).find((p) => p.pk === T.target), L2 = (p) => `${p.set} #${p.cn}${p.foil ? " (foil)" : ""}`;
+      const lines = [`${T.name} in "${T.deck}": make all ${L2(p0)}`, ""].concat(plan.moves.map((m) => `In ManaBox: take ${m.qty}× ${T.name} ${L2(m.get)} out of "${m.binder}", and move ${m.qty}× ${T.name} ${L2(m.give)} from "${T.deck}" into "${m.binder}". Then put the ${L2(m.get)} copies into "${T.deck}".`));
+      if (plan.short) lines.push("", `Still ${plan.short} short of ${L2(p0)} (not free in any binder).`);
+      showOut(`${T.deck} — ${T.name} tidy`, lines.join("\n") + "\n", "land_tidy.txt");
+    }
     else if (a === "colview") { CF().view = el.dataset.v; render(); }
     else if (a === "collayout") { CF().layout = el.dataset.v; CF().limit = 120; render(); }
     else if (a === "colfilters") { CF().open = !CF().open; render(); }
@@ -1679,6 +1726,7 @@
       else if (k === "sort") f.sort = v; else f[k] = v;
       f.limit = 120; render(); return;
     }
+    if (ev.target.dataset && ev.target.dataset.tidy) { S.tidy = S.tidy || {}; S.tidy[ev.target.dataset.tidy] = ev.target.value; if (ev.target.dataset.tidy === "deck") S.tidy.target = ""; render(); return; }
     if (ev.target.id === "rbmode") { S.rbmode = ev.target.value; render(); }
     else if (ev.target.dataset && ev.target.dataset.pick) {
       const d = deckBySlug(ev.target.dataset.slug), key = ev.target.dataset.pick, v = ev.target.value;

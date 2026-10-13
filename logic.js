@@ -666,6 +666,42 @@
   const rebuildText = (lines) => lines.map((l) => `${l.qty} ${l.name} (${String(l.row.set).toUpperCase()}) ${l.row.cn}${/foil/i.test(l.row.foil) && !/normal/i.test(l.row.foil) ? " *F*" : ""}`).join("\n");
 
 
+
+  /* ---------- Basic land tidy: which printings of a basic each deck uses, and how to make a deck uniform ---------- */
+  const isFoilRow = (r) => /foil|etched/i.test(r.foil || "") && !/^normal$/i.test((r.foil || "").trim());
+  function basicNames(rows) { return [...new Set(rows.filter((r) => isBasic(r.name)).map((r) => r.name))].sort(); }
+  // -> [{ binder, isDeck, prints: [{pk,set,cn,setName,foil,sid,qty}], total }]; decks first
+  function basicHolders(rows, name) {
+    const by = new Map();
+    for (const r of rows) {
+      if (norm(r.name) !== norm(name)) continue;
+      const h = by.get(r.binder) || { binder: r.binder, isDeck: /deck/i.test(r.btype || ""), prints: new Map(), total: 0 };
+      const pk = printKey(r), p = h.prints.get(pk) || { pk, set: String(r.set || "").toUpperCase(), cn: r.cn, setName: r.setName, foil: isFoilRow(r), sid: r.sid, qty: 0 };
+      p.qty += r.qty; h.total += r.qty; h.prints.set(pk, p); by.set(r.binder, h);
+    }
+    return [...by.values()].map((h) => ({ ...h, prints: [...h.prints.values()].sort((a, b) => b.qty - a.qty) })).sort((a, b) => (b.isDeck - a.isDeck) || a.binder.localeCompare(b.binder));
+  }
+  // Make `deck` use only the printing `target` (a printKey) for this basic, swapping copies with non-deck binders.
+  function tidyPlan(holders, deckBinder, target) {
+    const dk = holders.find((h) => h.binder === deckBinder);
+    if (!dk) return { moves: [], have: 0, need: 0, short: 0 };
+    const mine = dk.prints.find((p) => p.pk === target), have = mine ? mine.qty : 0, need = dk.total - have;
+    const wrong = dk.prints.filter((p) => p.pk !== target).map((p) => ({ ...p, left: p.qty }));
+    const supply = [];
+    for (const h of holders) if (!h.isDeck) { const p = h.prints.find((x) => x.pk === target); if (p) supply.push({ binder: h.binder, p, left: p.qty }); }
+    supply.sort((a, b) => b.left - a.left);
+    const moves = []; let remaining = need;
+    for (const s of supply) {
+      for (const w of wrong) {
+        const n = Math.min(s.left, w.left, remaining);
+        if (n > 0) { moves.push({ qty: n, binder: s.binder, give: w, get: s.p }); s.left -= n; w.left -= n; remaining -= n; }
+      }
+    }
+    // other decks that hold the target printing (for the shortfall)
+    const elsewhere = remaining > 0 ? holders.filter((h) => h.isDeck && h.binder !== deckBinder && h.prints.some((p) => p.pk === target)).map((h) => ({ binder: h.binder, qty: h.prints.find((p) => p.pk === target).qty })) : [];
+    return { moves, have, need, short: remaining, elsewhere };
+  }
+
   /* ---------- Collection browser: one entry per owned printing, plus filter + sort ---------- */
   const WUBRG = ["W", "U", "B", "R", "G"], RARITY_ORDER = { common: 0, uncommon: 1, rare: 2, mythic: 3, special: 4, bonus: 5 };
   function collectionEntries(rows, idx) {
@@ -683,6 +719,7 @@
       }
       { const p = rowAUD(r); if (p != null) { e._pv = (e._pv || 0) + p * r.qty; e._pq = (e._pq || 0) + r.qty; } }
       e.qty += r.qty; e.binders.set(r.binder, (e.binders.get(r.binder) || 0) + r.qty);
+      if (!/deck/i.test(r.btype || "")) e.freeQty = (e.freeQty || 0) + r.qty; else e.deckQty = (e.deckQty || 0) + r.qty;
       if (!e.sid && r.sid) e.sid = r.sid;
     }
     const arr = [...m.values()]; for (const e of arr) { e.price = e._pq ? e._pv / e._pq : null; e.value = e._pq ? e._pv : null; } return arr;
@@ -698,6 +735,7 @@
       if (f.set && e.set !== f.set) return false;
       if (f.foil === "foil" && !e.foil) return false;
       if (f.foil === "nonfoil" && e.foil) return false;
+      if (f.foil === "spare" && !(e.foil && e.freeQty > 0)) return false;
       if (rars && !rars.has(e.rarity)) return false;
       if (types && ![...types].some((t) => e.frontType.includes(t))) return false;
       if (mvs && !(mvs.has(Math.min(7, Math.max(0, e.mv))) && e.mv >= 0)) return false;
@@ -928,7 +966,7 @@
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
     pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
-    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, tickEntries, snapPrint, matchTitle, matchAnyTitle, fuzzyEntry, lev, indexBySetCn, fixDigits, cnNum, parseCollector, matchScan, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
+    eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, basicNames, basicHolders, tidyPlan, printKey, tickEntries, snapPrint, matchTitle, matchAnyTitle, fuzzyEntry, lev, indexBySetCn, fixDigits, cnNum, parseCollector, matchScan, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MTG = api;
