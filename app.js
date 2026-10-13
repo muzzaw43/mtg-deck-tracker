@@ -73,6 +73,7 @@
     else if (t === "deck") S.deck = null;
     else if (t === "tick") { S.tk = null; }
     else if (t === "scanlist") { S.sc = null; }
+    else if (t === "land") { S.land = false; }
     if (t === "modal" && scanEl) scanStop();
     render();
   });
@@ -489,6 +490,7 @@
   }
   function vDecks() {
     if (S.sc) return vScanList();
+    if (S.land && !S.deck) return `<button class="btn alt" data-act="landback">← Decks</button><h2>Land tidy</h2>` + vTidy();
     if (S.deck) return vDeck(deckBySlug(S.deck));
     if (!S.decks.length) return emptyMsg("No decks loaded yet.");
     const rq = reviewQueue();
@@ -496,7 +498,7 @@
     const stale = S.rows.length && (mm || (age != null && age >= 7)) ? `<div class="card lvl-warn">${mm ? `<b>${mm} swap${mm > 1 ? "s" : ""} made by hand ${mm > 1 ? "aren't" : "isn't"} in the collection file yet.</b> Update ManaBox, export it and upload the new CSV (Data tab). ` : ""}${age != null && age >= 7 ? `The collection file is ${age} days old.` : ""}</div>` : "";
     const findbox = `<input type="text" id="findq" placeholder="Where is a card? Search your decks and collection…" value="${esc(S.findq || "")}" autocomplete="off" style="width:100%;margin:6px 0"><div id="findres">${findResults(S.findq || "")}</div>`;
     const rbox = rq.length && S.reviewer ? `<div class="card"><b>Swaps to review (${rq.length})</b>${rq.map(({ d, p }) => `<div class="row" data-act="open" data-slug="${esc(d.slug)}" style="cursor:pointer"><span>${esc(d.name || d.slug)}: <b>${esc(p.in || "?")}</b>${p.out ? " for " + esc(p.out) : ""}<div class="muted">${esc(swapAuthor(p))}${(p.comments || []).length ? " — " + esc(p.comments[0].text) : ""}</div></span><span class="muted">open →</span></div>`).join("")}</div>` : "";
-    return stale + rbox + `<button class="btn" data-act="scopen">Scan in a deck list</button>` + findbox + `<div class="tiles">` + S.decks.map((d) => {
+    return stale + rbox + `<div class="row"><button class="btn" data-act="scopen">Scan in a deck list</button>${S.rows.length ? `<button class="btn alt" data-act="landopen">Land tidy</button>` : ""}</div>` + findbox + `<div class="tiles">` + S.decks.map((d) => {
       const m = M.deckMap(d, S.idx), tot = M.deckTotal(m), is = issuesFor(d.slug);
       const er = is.filter((i) => i.level === "error").length, wa = is.filter((i) => i.level === "warn").length;
       const act = M.activePencils(d), mm = new Map();
@@ -1316,9 +1318,8 @@
     const f = CF(), all = colEntries();
     const chip = (fld, v, label, on) => `<button data-act="colchip" data-f="${fld}" data-v="${esc(v)}" class="${on ? "on" : ""}">${label}</button>`;
     const pipb = (fld, c, on) => chip(fld, c, `<span class="pip pip-${c}">${c}</span>`, on);
-    let h = `<h2>Collection</h2><div class="chips vt"><button data-act="colview" data-v="binders" class="${f.view === "binders" ? "on" : ""}">Binders</button><button data-act="colview" data-v="cards" class="${f.view === "cards" ? "on" : ""}">All cards</button><button data-act="colview" data-v="sets" class="${f.view === "sets" ? "on" : ""}">Sets</button><button data-act="colview" data-v="tidy" class="${f.view === "tidy" ? "on" : ""}">Land tidy</button></div>`;
+    let h = `<h2>Collection</h2><div class="chips vt"><button data-act="colview" data-v="binders" class="${f.view === "binders" ? "on" : ""}">Binders</button><button data-act="colview" data-v="cards" class="${f.view === "cards" ? "on" : ""}">All cards</button><button data-act="colview" data-v="sets" class="${f.view === "sets" ? "on" : ""}">Sets</button></div>`;
     if (f.view === "sets") return h + vSets();
-    if (f.view === "tidy") return h + vTidy();
     if (f.view === "binders") {
       const bs = M.binderSummary(S.rows);
       h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders, worth about $${bs.reduce((s, b) => s + b.value, 0).toFixed(0)} AUD (${S.live ? "live market prices from Scryfall, converted to AUD" : "the prices ManaBox holds, until live prices load"}). Tap a binder to look inside.${S.csvName ? ` Collection updated ${esc(csvDate() || S.csvName)}.` : ""}</div></div>`;
@@ -1582,7 +1583,7 @@
     if (Date.now() < S.noClickUntil) { ev.preventDefault(); ev.stopPropagation(); return; }
     if (ev.target.closest && ev.target.closest("#refresh")) { forceRefresh(); return; }
     const tabBtn = ev.target.closest("#tabs button");
-    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.tk = null; S.sc = null; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
+    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.tk = null; S.sc = null; S.land = false; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
     const el = ev.target.closest("[data-act]");
     if (!el) return;
     const a = el.dataset.act;
@@ -1608,6 +1609,8 @@
     else if (a === "tklist") showOut((deckBySlug(S.tk.slug).name || "") + " — what's physically here", tkReport("list"), S.tk.slug + "_physical.txt");
     else if (a === "tkscan") tkScan("tick");
     else if (a === "scopen") { S.sc = scLoad(); S.deck = null; pushNav("scanlist"); render(); window.scrollTo(0, 0); }
+    else if (a === "landopen") { S.land = true; S.deck = null; pushNav("land"); render(); window.scrollTo(0, 0); }
+    else if (a === "landback") { S.land = false; popNav("land"); render(); }
     else if (a === "scback") { S.sc = null; popNav("scanlist"); render(); }
     else if (a === "scscan") tkScan("list");
     else if (a === "scclear") { if (confirm("Clear the scanned list?")) { S.sc.cards = []; scSave(); render(); } }
