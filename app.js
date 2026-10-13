@@ -1396,11 +1396,16 @@
       return `<div class="card lpr"><div class="lph"><div class="ptile">${p.sid ? `<img loading="lazy" alt="${esc(p.set)} #${esc(p.cn)}" src="${esc(M.artUrl(p.sid, "normal"))}" data-fb="${esc(M.artByName(T.name, "normal"))}">` : `<div class="pnoimg">no image</div>`}${p.foil ? `<span class="ftag">FOIL</span>` : ""}<div class="pcap">${esc(p.set)} #${esc(p.cn)}</div></div><div><b>${lbl(p)}</b>${p.foil ? ` <span class="pill warn">foil</span>` : ""}<div class="muted">${esc(p.setName || "")}</div><div class="muted">${e.qty} in total · ${e.free} spare</div><div class="muted src">${e.src.map((x) => `${esc(x.b)}${x.deck ? " (deck)" : ""} ×${x.n}`).join(", ")}</div><span class="pill ${left > 0 ? "ok" : "warn"}">${left} left over</span></div></div>
         ${B.rows.map((r) => { const w = r.w[p.pk] || 0, c = r.cur[p.pk] || 0, d = esc(r.x.binder), k = esc(p.pk); return `<div class="lrow"><span class="n">${d}</span><span class="muted">now ${c}</span><button class="btn alt" data-act="lw" data-d="${d}" data-pk="${k}" data-v="-1">−</button><b class="lnum${w !== c ? " chg" : ""}">${w}</b><button class="btn alt" data-act="lw" data-d="${d}" data-pk="${k}" data-v="1">+</button><button class="btn alt" data-act="lw" data-d="${d}" data-pk="${k}" data-v="fill">Fill</button></div>`; }).join("")}</div>`;
     }).join("");
-    const plan = tidyMoves(B);
-    h += `<h3>Changes to make</h3>` + (plan.length ? `<div class="card">${plan.map((l) => `<div class="cardrow"><div class="t"><span class="n">${esc(l)}</span></div></div>`).join("")}<div class="row" style="margin-top:6px"><button class="btn" data-act="tidytext">Show as a list</button></div></div>` : `<div class="muted">No changes planned for the ticked decks.</div>`);
-    const dirty = T.touched && T.touched.size, sp = S.landplan;
-    h += `<div class="card ${dirty ? "lvl-warn" : ""}"><b>Saved plan</b><div class="muted">${sp && sp.updated ? "Last saved " + esc(sp.updated) + (sp.by ? " by " + esc(sp.by) : "") + ". Opens on any device." : "Nothing saved yet."}${dirty ? ` <b>You have unsaved changes (${T.touched.size} deck${T.touched.size > 1 ? "s" : ""}).</b>` : ""}${T.stale && T.stale.length ? ` Ignored saved plan for ${esc([...new Set(T.stale)].join(", "))}: it no longer matches your collection.` : ""}${T.savemsg ? " " + esc(T.savemsg) : ""}</div><div class="row">${S.wtoken ? `<button class="btn" data-act="tidysave" ${dirty ? "" : "disabled"}>Save plan</button>` : `<span class="muted">Add a write token in Data to save.</span>`}<button class="btn alt" data-act="tidyreset" ${dirty ? "" : "disabled"}>Undo my changes</button><button class="btn alt" data-act="tidyclear">Clear ${esc(T.name)} plan</button></div></div>`;
+    const plan = tidyMoves(B), dn = tidyDone(T.name);
+    h += `<h3>Changes to make</h3>` + (plan.length ? `<div class="card"><div class="muted">${plan.filter((l) => dn.has(l.k)).length} of ${plan.length} done. Tap a line as you make each move in ManaBox, then Save plan.</div>${plan.map((l) => `<div class="cardrow ldone${dn.has(l.k) ? " is" : ""}" data-act="ldone" data-k="${esc(l.k)}"><div class="t"><span class="ck">${dn.has(l.k) ? "☑" : "☐"}</span><span class="n">${esc(l.t)}</span></div></div>`).join("")}<div class="row" style="margin-top:6px"><button class="btn" data-act="tidytext">Show as a list</button></div></div>` : `<div class="muted">No changes planned for the ticked decks.</div>`);
+    const dirty = (T.touched && T.touched.size) || (T.doneTouched && T.doneTouched.size), sp = S.landplan;
+    h += `<div class="card ${dirty ? "lvl-warn" : ""}"><b>Saved plan</b><div class="muted">${sp && sp.updated ? "Last saved " + esc(sp.updated) + (sp.by ? " by " + esc(sp.by) : "") + ". Opens on any device." : "Nothing saved yet."}${dirty ? ` <b>You have unsaved changes.</b>` : ""}${T.stale && T.stale.length ? ` Ignored saved plan for ${esc([...new Set(T.stale)].join(", "))}: it no longer matches your collection.` : ""}${T.savemsg ? " " + esc(T.savemsg) : ""}</div><div class="row">${S.wtoken ? `<button class="btn" data-act="tidysave" ${dirty ? "" : "disabled"}>Save plan</button>` : `<span class="muted">Add a write token in Data to save.</span>`}<button class="btn alt" data-act="tidyreset" ${dirty ? "" : "disabled"}>Undo my changes</button><button class="btn alt" data-act="tidyclear">Clear ${esc(T.name)} plan</button></div></div>`;
     return h;
+  }
+  function tidyDone(nm) {
+    const T = S.tidy; T.doneBy = T.doneBy || {};
+    if (!T.doneBy[nm]) { const sv = S.landplan && S.landplan.done && S.landplan.done[nm]; T.doneBy[nm] = new Set(Array.isArray(sv) ? sv : []); }
+    return T.doneBy[nm];
   }
   async function tidySavePlan() {
     const T = S.tidy; if (!S.wtoken) { T.savemsg = "Saving needs a write token (Data tab)."; render(); return; }
@@ -1419,24 +1424,26 @@
         if (same) { if (data.plans[nm]) { delete data.plans[nm][b]; if (!Object.keys(data.plans[nm]).length) delete data.plans[nm]; } }
         else { data.plans[nm] = data.plans[nm] || {}; data.plans[nm][b] = Object.fromEntries(Object.entries(w).filter(([, n]) => n > 0)); }
       }
+      for (const nm of T.doneTouched || []) { data.done = data.done || {}; const ks = [...tidyDone(nm)]; if (ks.length) data.done[nm] = ks; else delete data.done[nm]; }
+      if (data.done && !Object.keys(data.done).length) delete data.done;
       data.updated = new Date().toISOString().slice(0, 10); data.by = S.who || "";
       const r = await fetch(url, { method: "PUT", headers: hd, body: JSON.stringify({ message: `Land plan saved${S.who ? " [" + S.who + "]" : ""}`, content: b64(JSON.stringify(data, null, 1) + "\n"), sha, branch: S.cfg.branch }) });
       if (!r.ok) throw new Error("GitHub " + r.status);
-      S.landplan = data; T.touched = new Set(); T.stale = []; T.savemsg = "Saved.";
+      S.landplan = data; T.touched = new Set(); T.stale = []; T.doneTouched = new Set(); T.savemsg = "Saved.";
     } catch (e) { T.savemsg = "Save failed: " + e.message; }
     render();
   }
   function tidyMoves(B) {
     const L = (p) => `${p.set} #${p.cn}${p.foil ? " (foil)" : ""}`, out = [], net = new Map();
     for (const r of B.rows) {
-      const outs = [], ins = [];
-      for (const e of B.prints) { const d = (r.w[e.p.pk] || 0) - (r.cur[e.p.pk] || 0); if (d > 0) { ins.push(`${d}× ${L(e.p)}`); net.set(e.p.pk, (net.get(e.p.pk) || 0) + d); } else if (d < 0) { outs.push(`${-d}× ${L(e.p)}`); net.set(e.p.pk, (net.get(e.p.pk) || 0) + d); } }
-      if (outs.length || ins.length) out.push(`${r.x.binder}: take out ${outs.join(", ") || "nothing"}; put in ${ins.join(", ") || "nothing"}`);
+      const outs = [], ins = [], sig = [];
+      for (const e of B.prints) { const d = (r.w[e.p.pk] || 0) - (r.cur[e.p.pk] || 0); if (d > 0) { ins.push(`${d}× ${L(e.p)}`); sig.push(e.p.pk + ":" + d); net.set(e.p.pk, (net.get(e.p.pk) || 0) + d); } else if (d < 0) { outs.push(`${-d}× ${L(e.p)}`); sig.push(e.p.pk + ":" + d); net.set(e.p.pk, (net.get(e.p.pk) || 0) + d); } }
+      if (outs.length || ins.length) out.push({ k: `d|${r.x.binder}|${sig.join(",")}`, t: `${r.x.binder}: take out ${outs.join(", ") || "nothing"}; put in ${ins.join(", ") || "nothing"}` });
     }
     for (const e of B.prints) {
       const n = net.get(e.p.pk) || 0; if (!n) continue;
-      if (n > 0) { let need = n; const src = []; for (const f of [...B.free].sort((a, b) => ((b.prints.find((q) => q.pk === e.p.pk) || {}).qty || 0) - ((a.prints.find((q) => q.pk === e.p.pk) || {}).qty || 0))) { const q = (f.prints.find((x) => x.pk === e.p.pk) || {}).qty || 0, t = Math.min(q, need); if (t > 0) { src.push(`${t}× from "${f.binder}"`); need -= t; } } if (need) src.push(`${need}× from the decks above`); out.push(`Net ${n}× ${L(e.p)} comes in: ${src.join(", ")}`); }
-      else out.push(`Net ${-n}× ${L(e.p)} goes back to a free binder`);
+      if (n > 0) { let need = n; const src = []; for (const f of [...B.free].sort((a, b) => ((b.prints.find((q) => q.pk === e.p.pk) || {}).qty || 0) - ((a.prints.find((q) => q.pk === e.p.pk) || {}).qty || 0))) { const q = (f.prints.find((x) => x.pk === e.p.pk) || {}).qty || 0, t = Math.min(q, need); if (t > 0) { src.push(`${t}× from "${f.binder}"`); need -= t; } } if (need) src.push(`${need}× from the decks above`); out.push({ k: `n|${e.p.pk}|${n}`, t: `Net ${n}× ${L(e.p)} comes in: ${src.join(", ")}` }); }
+      else out.push({ k: `n|${e.p.pk}|${n}`, t: `Net ${-n}× ${L(e.p)} goes back to a free binder` });
     }
     return out;
   }
@@ -1724,8 +1731,9 @@
     else if (a === "upgpick") { openModalNav(); S.ch = { mode: "out", slug: el.dataset.slug, i: null, q: "", pendIn: el.dataset.key }; render(); }
     else if (a === "tidyname") { S.tidy = S.tidy || {}; S.tidy.name = el.dataset.n; S.tidy.msg = ""; render(); }
     else if (a === "tidypick") { const B = tidyBoard(), m = el.dataset.m; S.tidy.sel = m === "all" ? B.allDecks.map((x) => x.binder) : m === "mixed" ? B.allDecks.filter((x) => x.prints.length > 1).map((x) => x.binder) : []; tidySave("mtg_tidysel", S.tidy.sel); render(); }
-    else if (a === "tidyreset") { S.tidy.want = {}; S.tidy.touched = new Set(); S.tidy.stale = []; S.tidy.msg = ""; render(); }
-    else if (a === "tidyclear") { const B = tidyBoard(); S.tidy.touched = S.tidy.touched || new Set(); for (const r of B.rows) { S.tidy.want[S.tidy.name + "|" + r.x.binder] = { ...r.cur }; S.tidy.touched.add(S.tidy.name + "|" + r.x.binder); } render(); }
+    else if (a === "ldone") { const T = S.tidy, ds = tidyDone(T.name), k = el.dataset.k; if (ds.has(k)) ds.delete(k); else ds.add(k); T.doneTouched = T.doneTouched || new Set(); T.doneTouched.add(T.name); render(); }
+    else if (a === "tidyreset") { S.tidy.doneBy = {}; S.tidy.doneTouched = new Set(); S.tidy.want = {}; S.tidy.touched = new Set(); S.tidy.stale = []; S.tidy.msg = ""; render(); }
+    else if (a === "tidyclear") { const B = tidyBoard(); S.tidy.doneBy = S.tidy.doneBy || {}; S.tidy.doneBy[S.tidy.name] = new Set(); S.tidy.doneTouched = S.tidy.doneTouched || new Set(); S.tidy.doneTouched.add(S.tidy.name); S.tidy.touched = S.tidy.touched || new Set(); for (const r of B.rows) { S.tidy.want[S.tidy.name + "|" + r.x.binder] = { ...r.cur }; S.tidy.touched.add(S.tidy.name + "|" + r.x.binder); } render(); }
     else if (a === "tidysave") { tidySavePlan(); }
     else if (a === "lw") {
       const B = tidyBoard(), r = B.rows.find((x) => x.x.binder === el.dataset.d), e = B.prints.find((x) => x.p.pk === el.dataset.pk), v = el.dataset.v;
@@ -1745,7 +1753,7 @@
       render();
     }
     else if (a === "tidytext") {
-      const B = tidyBoard(), lines = [`${S.tidy.name} plan`, "", ...tidyMoves(B)];
+      const B = tidyBoard(), lines = [`${S.tidy.name} plan`, "", ...tidyMoves(B).map((l) => (tidyDone(S.tidy.name).has(l.k) ? "[done] " : "[ ] ") + l.t)];
       showOut(`${S.tidy.name} plan`, lines.join("\n") + "\n", "land_plan.txt");
     }
     else if (a === "colview") { CF().view = el.dataset.v; render(); }
