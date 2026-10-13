@@ -155,3 +155,9 @@ tr.flag td{background:rgba(230,180,80,.16)}
 .ptile .pm{opacity:.7}
 .ptile.sm{width:64px}.ptile.sm img,.ptile.sm .pnoimg{height:44px}
 .mv{display:flex;align-items:center;gap:6px}
+.lpr .lph{display:flex;gap:10px;align-items:center;margin-bottom:6px}
+.lpr .lph .ptile{width:120px;flex:none}.lpr .lph .ptile img{height:88px}
+.lrow{display:flex;align-items:center;gap:8px;padding:4px 0;border-top:1px solid rgba(128,128,128,.2)}
+.lrow .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lrow .btn{min-width:40px;padding:8px 10px}
+.lnum{min-width:22px;text-align:center;font-size:16px}.lnum.chg{color:#4ade80}
