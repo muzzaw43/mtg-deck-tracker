@@ -1043,6 +1043,13 @@
         return `<div data-hold class="sc ${role}" data-act="zoom" data-key="${esc(k)}" data-slug="${esc(d.slug)}">${artImg(k, nm, d, "normal", "scimg")}<div class="scl"><span class="tagl ${role}">${role.toUpperCase()}</span> ${esc(nm)}</div>${role === "in" ? `<div>${ownPill(k, true)}</div>` : ""}</div>`;
       };
       x += `<div class="swapcards">${side(p.out, "out")}<div class="arrow">→</div>${side(p.in, "in")}</div>`;
+      if (p.in && S.rows.length) {
+        const ik = M.keyOf(S.idx, p.in), pr = M.isBasic(p.in) ? [] : M.printings(S.own, ik, d, S.cfg);
+        if (pr.length) {
+          const pk = (d.picks || {})[ik], cur = pk ? M.printKeyOf(pk) : "";
+          x += `<div class="row" style="margin-top:6px"><span class="muted">Copy to use for ${esc(plain(p.in))}:</span><select data-pick="${esc(ik)}" data-slug="${esc(d.slug)}"><option value="">Auto</option>${pr.map((y) => `<option value="${esc(y.k)}"${y.k === cur ? " selected" : ""}>${esc(String(y.set).toUpperCase())} #${esc(y.cn)}${/foil/i.test(y.foil) && !/normal/i.test(y.foil) ? " ★foil" : ""} · ${y.avail}× · ${esc([...y.where].join(", "))}</option>`).join("")}</select></div>`;
+        }
+      }
       if ((p.comments || []).length) x += `<div class="cmts">${p.comments.map((c) => `<div class="cmt"><span class="muted">${esc(c.by || "")} · ${esc(c.at || "")}</span> ${esc(c.text)}</div>`).join("")}</div>`;
       return x + (btns ? `<div>${btns}</div>` : "") + `</div>`;
     }).join("");
@@ -1351,29 +1358,41 @@
     return `<div class="card lvl-${i.level}"><div class="row"><span>${i.card ? `<b>${esc(i.card)}</b> — ` : ""}${esc(i.msg)}</span></div>${i.deckName ? `<div class="muted">${esc(i.deckName)}</div>` : ""}</div>`;
   }
   /* ---------- Land tidy: which printings of each basic every deck uses ---------- */
+  function tidyExcl() {
+    const T = S.tidy; if (!T.ex) { try { T.ex = JSON.parse(localStorage.getItem("mtg_tidyx") || "[]"); } catch (e) { T.ex = []; } }
+    return new Set(T.ex);
+  }
   function vTidy() {
     const names = M.basicNames(S.rows), T = S.tidy = S.tidy || { name: "", deck: "", target: "" };
     if (!names.length) return `<div class="card muted">No basic lands in the collection.</div>`;
     if (!names.includes(T.name)) T.name = names.includes("Plains") ? "Plains" : names[0];
-    const hs = M.basicHolders(S.rows, T.name), decks = hs.filter((x) => x.isDeck), free = hs.filter((x) => !x.isDeck);
+    const ex = tidyExcl();
+    const allHs = M.basicHolders(S.rows, T.name);
+    const hs = M.basicHolders(S.rows.filter((r) => !ex.has(r.binder)), T.name), decks = hs.filter((x) => x.isDeck), free = hs.filter((x) => !x.isDeck);
     const lbl = (p) => `${esc(p.set)} #${esc(p.cn)}${p.foil ? " ★" : ""}`;
-    let h = `<div class="muted">Which printings of each basic land every deck uses, to help make each deck consistent. This only reads your collection; nothing is changed. Red means a deck mixes printings.</div>
+    const tile = (p, n, extra) => `<div class="ptile${extra || ""}" title="${esc(p.setName || p.set)}">${p.sid ? `<img loading="lazy" alt="" src="${esc(M.artUrl(p.sid, "art_crop"))}">` : `<div class="pnoimg">no image</div>`}<span class="pq">${n != null ? n + "×" : ""}${p.foil ? " ★" : ""}</span><span class="pl">${esc(p.set)} #${esc(p.cn)}</span></div>`;
+    const tiles = (x) => `<div class="ptiles">${x.prints.map((p) => tile(p, p.qty)).join("")}</div>`;
+    const head = (x) => `<label class="n"><input type="checkbox" data-tidyx="${esc(x.binder)}" checked> ${esc(x.binder)}</label>`;
+    let h = `<div class="muted">Which printings of each basic land every deck uses, to help make each deck consistent. This only reads your collection; nothing is changed. Untick a deck or binder to leave it out of everything below (kept on this device). Red means a deck mixes printings.</div>
       <div class="chips vt">${names.map((n) => `<button data-act="tidyname" data-n="${esc(n)}" class="${T.name === n ? "on" : ""}">${esc(n)}</button>`).join("")}</div>`;
-    h += `<h3>${esc(T.name)} in decks</h3>` + (decks.length ? decks.map((x) => `<div class="cardrow"><div class="t"><span class="n">${esc(x.binder)}</span><span>${x.prints.length > 1 ? `<span class="pill err">${x.prints.length} printings</span> ` : ""}${x.prints.map((p) => `${p.qty}× ${lbl(p)}`).join(" · ")}</span></div></div>`).join("") : `<div class="muted">None.</div>`);
-    h += `<h3>${esc(T.name)} not in decks</h3>` + (free.length ? free.map((x) => `<div class="cardrow"><div class="t"><span class="n">${esc(x.binder)}</span><span>${x.prints.map((p) => `${p.qty}× ${lbl(p)}`).join(" · ")}</span></div></div>`).join("") : `<div class="muted">None.</div>`);
+    h += `<h3>${esc(T.name)} in decks</h3>` + (decks.length ? decks.map((x) => `<div class="card">${head(x)}${x.prints.length > 1 ? ` <span class="pill err">${x.prints.length} printings</span>` : ""}${tiles(x)}</div>`).join("") : `<div class="muted">None.</div>`);
+    h += `<h3>${esc(T.name)} not in decks</h3>` + (free.length ? free.map((x) => `<div class="card">${head(x)}${tiles(x)}</div>`).join("") : `<div class="muted">None.</div>`);
+    const exl = allHs.filter((x) => ex.has(x.binder));
+    if (exl.length) h += `<h3>Left out (${exl.length})</h3>` + exl.map((x) => `<div class="cardrow"><div class="t"><label class="n"><input type="checkbox" data-tidyx="${esc(x.binder)}"> ${esc(x.binder)}</label><span class="muted">${x.prints.map((p) => `${p.qty}× ${lbl(p)}`).join(" · ")}</span></div></div>`).join("") + `<div class="row"><button class="btn alt" data-act="tidyall">Include everything again</button></div>`;
     const mixed = decks.filter((x) => x.prints.length > 1);
     h += `<h3>Make one deck uniform</h3><div class="card"><div class="row"><select data-tidy="deck"><option value="">Choose a deck…</option>${decks.map((x) => `<option value="${esc(x.binder)}" ${T.deck === x.binder ? "selected" : ""}>${esc(x.binder)}${x.prints.length > 1 ? " (mixed)" : ""}</option>`).join("")}</select></div>`;
     const dk = decks.find((x) => x.binder === T.deck);
     if (dk) {
       const all = new Map(); for (const x of hs) for (const p of x.prints) { const a = all.get(p.pk) || { p, here: 0, free: 0, other: 0 }; if (x.binder === dk.binder) a.here += p.qty; else if (x.isDeck) a.other += p.qty; else a.free += p.qty; all.set(p.pk, a); }
       if (!all.has(T.target)) T.target = dk.prints[0].pk;
-      h += `<div class="muted" style="margin-top:6px">Make every ${esc(T.name)} in ${esc(dk.binder)} this printing:</div><select data-tidy="target">${[...all.values()].sort((a, b) => b.here - a.here || b.free - a.free).map((a) => `<option value="${esc(a.p.pk)}" ${T.target === a.p.pk ? "selected" : ""}>${lbl(a.p)} · ${a.here} here · ${a.free} in binders · ${a.other} in other decks</option>`).join("")}</select>`;
+      const sorted = [...all.values()].sort((a, b) => b.here - a.here || b.free - a.free);
+      h += `<div class="muted" style="margin-top:6px">Tap the printing you want every ${esc(T.name)} in ${esc(dk.binder)} to be:</div><div class="ptiles">${sorted.map((a) => `<div class="ptile${T.target === a.p.pk ? " sel" : ""}" data-act="tidytarget" data-pk="${esc(a.p.pk)}">${a.p.sid ? `<img loading="lazy" alt="" src="${esc(M.artUrl(a.p.sid, "art_crop"))}">` : `<div class="pnoimg">no image</div>`}<span class="pq">${a.here} here${a.p.foil ? " ★" : ""}</span><span class="pl">${esc(a.p.set)} #${esc(a.p.cn)}</span><span class="pm">${a.free} free · ${a.other} in decks</span></div>`).join("")}</div>`;
       const plan = M.tidyPlan(hs, dk.binder, T.target);
       if (!plan.need) h += `<div class="pill ok" style="margin-top:6px">Already uniform: all ${dk.total} are this printing.</div>`;
       else {
         h += `<div style="margin-top:6px"><b>${plan.need}</b> of ${dk.total} need changing${plan.short ? ` · <span class="pill warn">${plan.short} short</span>` : ` · <span class="pill ok">all available</span>`}</div>`;
-        h += plan.moves.map((m) => `<div class="cardrow"><div class="t"><span class="n">${m.qty}× ${esc(T.name)}: swap ${lbl(m.give)} for ${lbl(m.get)}</span><span class="muted">with “${esc(m.binder)}”</span></div></div>`).join("");
-        if (plan.short) h += `<div class="muted">${plan.short} more of this printing ${plan.elsewhere.length ? "are in other decks: " + plan.elsewhere.map((e) => esc(e.binder) + " ×" + e.qty).join(", ") + ". Moving those would change that deck." : "aren't free anywhere. Pick a printing you have more of, or look for spares."}</div>`;
+        h += plan.moves.map((m) => `<div class="cardrow"><div class="t"><span class="n">${m.qty}× ${esc(T.name)}: swap out</span><span class="mv">${tile(m.give, null, " sm")}<span>→</span>${tile(m.get, null, " sm")}</span></div><div class="muted">with “${esc(m.binder)}”: put ${lbl(m.give)} in, take ${lbl(m.get)} out</div></div>`).join("");
+        if (plan.short) h += `<div class="muted">${plan.short} more of this printing ${plan.elsewhere.length ? "are in other decks: " + plan.elsewhere.map((e) => esc(e.binder) + " ×" + e.qty).join(", ") + ". Moving those would change that deck (untick it above to ignore it)." : "aren't free anywhere. Pick a printing you have more of, or look for spares."}</div>`;
         h += `<div class="row" style="margin-top:6px"><button class="btn" data-act="tidytext">Show as a list</button></div>`;
       }
     }
@@ -1662,8 +1681,10 @@
     else if (a === "upgmore") { S.upgLimit = (S.upgLimit || 25) + 25; render(); }
     else if (a === "upgpick") { openModalNav(); S.ch = { mode: "out", slug: el.dataset.slug, i: null, q: "", pendIn: el.dataset.key }; render(); }
     else if (a === "tidyname") { S.tidy = S.tidy || {}; S.tidy.name = el.dataset.n; S.tidy.deck = ""; S.tidy.target = ""; render(); }
+    else if (a === "tidytarget") { S.tidy.target = el.dataset.pk; render(); }
+    else if (a === "tidyall") { S.tidy.ex = []; try { localStorage.removeItem("mtg_tidyx"); } catch (e) { /* ignore */ } render(); }
     else if (a === "tidytext") {
-      const T = S.tidy, hs = M.basicHolders(S.rows, T.name), plan = M.tidyPlan(hs, T.deck, T.target), p0 = hs.flatMap((x) => x.prints).find((p) => p.pk === T.target), L2 = (p) => `${p.set} #${p.cn}${p.foil ? " (foil)" : ""}`;
+      const T = S.tidy, ex0 = tidyExcl(), hs = M.basicHolders(S.rows.filter((r) => !ex0.has(r.binder)), T.name), plan = M.tidyPlan(hs, T.deck, T.target), p0 = hs.flatMap((x) => x.prints).find((p) => p.pk === T.target), L2 = (p) => `${p.set} #${p.cn}${p.foil ? " (foil)" : ""}`;
       const lines = [`${T.name} in "${T.deck}": make all ${L2(p0)}`, ""].concat(plan.moves.map((m) => `In ManaBox: take ${m.qty}× ${T.name} ${L2(m.get)} out of "${m.binder}", and move ${m.qty}× ${T.name} ${L2(m.give)} from "${T.deck}" into "${m.binder}". Then put the ${L2(m.get)} copies into "${T.deck}".`));
       if (plan.short) lines.push("", `Still ${plan.short} short of ${L2(p0)} (not free in any binder).`);
       showOut(`${T.deck} — ${T.name} tidy`, lines.join("\n") + "\n", "land_tidy.txt");
@@ -1725,6 +1746,11 @@
       if (k === "ciDeck") { f.ciDeck = v; f.ci = new Set(); const dk = S.decks.find((d) => d.slug === v); if (dk) { const cmd = M.commandersOf(dk); const set = new Set(); cmd.forEach((c) => { const i = M.cardInfo(S.idx, M.keyOf(S.idx, c)); if (i) i.ci.forEach((x) => set.add(x)); }); f.ci = set; f.ciDeck = v; } }
       else if (k === "sort") f.sort = v; else f[k] = v;
       f.limit = 120; render(); return;
+    }
+    if (ev.target.dataset && ev.target.dataset.tidyx) {
+      const b = ev.target.dataset.tidyx, ex = tidyExcl(); if (ev.target.checked) ex.delete(b); else ex.add(b);
+      S.tidy.ex = [...ex]; try { localStorage.setItem("mtg_tidyx", JSON.stringify(S.tidy.ex)); } catch (e) { /* ignore */ }
+      render(); return;
     }
     if (ev.target.dataset && ev.target.dataset.tidy) { S.tidy = S.tidy || {}; S.tidy[ev.target.dataset.tidy] = ev.target.value; if (ev.target.dataset.tidy === "deck") S.tidy.target = ""; render(); return; }
     if (ev.target.id === "rbmode") { S.rbmode = ev.target.value; render(); }
