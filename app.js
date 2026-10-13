@@ -1416,11 +1416,11 @@
       <input type="text" id="who" placeholder="Your name (shown in the swap log)" value="${esc(S.who)}" style="margin-top:6px">
       <label class="muted" style="display:block;margin-top:6px"><input type="checkbox" id="isrev" ${S.reviewer ? "checked" : ""}> I review swaps other people add (shows a "to review" list)</label>
       <button class="btn" data-act="savewtok">Save</button>${S.wtoken ? `<button class="btn alt" data-act="forgetw">Forget write token</button>` : ""}</div>`;
-    if (S.wtoken) h += `<h2>Update collection</h2><div class="card"><div class="muted">Pick a fresh ManaBox collection CSV. It replaces <b>collection/ManaBox_Collection.csv</b> in the data repo for everyone using it.</div><input type="file" id="upcsv" accept=".csv"></div>`;
+    if (S.wtoken) h += `<h2>Update collection</h2><div class="card"><div class="muted">Pick a fresh ManaBox collection CSV. It replaces <b>collection/ManaBox_Collection.csv</b> in the data repo for everyone using it.</div><input type="file" id="upcsv"><div class="muted" style="margin-top:4px">Any file can be picked here; it is checked to be a ManaBox collection export before anything is uploaded.</div></div>`;
     h += reconCard();
     if (S.log.length) h += `<div class="card muted">${S.log.map(esc).join("<br>")}</div>`;
     h += `<h2>Load local files</h2><div class="card"><div class="muted">Try things without the token: pick a ManaBox CSV and/or deck JSON files. Nothing leaves your device.</div>
-      <input type="file" id="local" multiple accept=".csv,.json"></div>`;
+      <input type="file" id="local" multiple></div>`;
     h += `<h2>Collection</h2>`;
     if (!S.rows.length) h += `<div class="card muted">No collection loaded.</div>`;
     else {
@@ -1693,7 +1693,7 @@
     else if (ev.target.id === "minprice") { S.minPrice = Math.max(0, parseFloat(ev.target.value) || 0); S.picked = null; render(); }
     else if (ev.target.id === "flagprice") { S.flagPrice = Math.max(0, parseFloat(ev.target.value) || 0); render(); }
     else if (ev.target.id === "showcommitted") { S.showCommitted = ev.target.checked; render(); }
-    else if (ev.target.id === "upcsv") { const f = ev.target.files[0]; if (f) uploadCollection(f); }
+    else if (ev.target.id === "upcsv") { const f = ev.target.files[0]; ev.target.value = ""; if (f) uploadCollection(f); }
     else if (ev.target.id === "local") {
       S.error = "";
       try {
