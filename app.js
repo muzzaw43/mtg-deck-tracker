@@ -74,6 +74,7 @@
     else if (t === "tick") { S.tk = null; }
     else if (t === "scanlist") { S.sc = null; }
     else if (t === "land") { S.land = false; }
+    else if (t === "foils") { S.fp = false; }
     if (t === "modal" && scanEl) scanStop();
     render();
   });
@@ -122,6 +123,7 @@
         return d;
       }));
       try { S.wl = JSON.parse(await gh("wishlist.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.wl = []; }
+      try { S.foilprio = JSON.parse(await gh("foilprio.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.foilprio = null; }
       try { S.landplan = JSON.parse(await gh("landplan.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.landplan = null; }
       const csvs = (await ghList("collection")).filter((f) => f.type === "file" && /\.csv$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name));
       let text = "", name = "";
@@ -508,6 +510,7 @@
   function vDecks() {
     if (S.sc) return vScanList();
     if (S.land && !S.deck) return `<button class="btn alt" data-act="landback">← Decks</button><h2>Land tidy</h2>` + vTidy();
+    if (S.fp && !S.deck) return `<button class="btn alt" data-act="fpback">← Decks</button><h2>Foils &amp; sleeves</h2>` + vFoils();
     if (S.deck) return vDeck(deckBySlug(S.deck));
     if (!S.decks.length) return emptyMsg("No decks loaded yet.");
     const rq = reviewQueue();
@@ -515,7 +518,7 @@
     const stale = S.rows.length && (mm || (age != null && age >= 7)) ? `<div class="card lvl-warn">${mm ? `<b>${mm} swap${mm > 1 ? "s" : ""} made by hand ${mm > 1 ? "aren't" : "isn't"} in the collection file yet.</b> Update ManaBox, export it and upload the new CSV (Data tab). ` : ""}${age != null && age >= 7 ? `The collection file is ${age} days old.` : ""}</div>` : "";
     const findbox = `<input type="text" id="findq" placeholder="Where is a card? Search your decks and collection…" value="${esc(S.findq || "")}" autocomplete="off" style="width:100%;margin:6px 0"><div id="findres">${findResults(S.findq || "")}</div>`;
     const rbox = rq.length && S.reviewer ? `<div class="card"><b>Swaps to review (${rq.length})</b>${rq.map(({ d, p }) => `<div class="row" data-act="open" data-slug="${esc(d.slug)}" style="cursor:pointer"><span>${esc(d.name || d.slug)}: <b>${esc(p.in || "?")}</b>${p.out ? " for " + esc(p.out) : ""}<div class="muted">${esc(swapAuthor(p))}${(p.comments || []).length ? " — " + esc(p.comments[0].text) : ""}</div></span><span class="muted">open →</span></div>`).join("")}</div>` : "";
-    return stale + rbox + `<div class="row"><button class="btn" data-act="scopen">Scan in a deck list</button>${S.rows.length ? `<button class="btn alt" data-act="landopen">Land tidy</button>` : ""}</div>` + findbox + `<div class="tiles">` + S.decks.map((d) => {
+    return stale + rbox + `<div class="row"><button class="btn" data-act="scopen">Scan in a deck list</button>${S.rows.length ? `<button class="btn alt" data-act="landopen">Land tidy</button><button class="btn alt" data-act="fpopen">Foils &amp; sleeves</button>` : ""}</div>` + findbox + `<div class="tiles">` + S.decks.map((d) => {
       const m = M.deckMap(d, S.idx), tot = M.deckTotal(m), is = issuesFor(d.slug);
       const er = is.filter((i) => i.level === "error").length, wa = is.filter((i) => i.level === "warn").length;
       const act = M.activePencils(d), mm = new Map();
@@ -1145,6 +1148,7 @@
       ${pens.some((p) => ["approved", "made"].includes(M.pencilStatus(p))) ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with confirmed changes</button>` : ""}</div>
       ${pens.some((p) => M.pencilStatus(p) === "pencilled") ? `<div class="muted">Pencilled swaps aren't in any export until you approve them.</div>` : ""}`;
     const pre = h + (S.statsOpen ? statsPanel(d) : "") + (S.upgOpen ? upgradePanel(d) : ""); h = "";
+    h += sleeveBox(d);
     const is = issuesFor(d.slug);
     if (is.length) h += `<h3>Checks</h3>` + is.map(issueHtml).join("");
     const btn = (i, act, txt, alt) => `<button class="btn${alt ? " alt" : ""}" data-act="swap" data-slug="${esc(d.slug)}" data-i="${i}" data-sw="${act}">${txt}</button>`;
@@ -1222,6 +1226,49 @@
     }
     h += delZone(d);
     return pre + cards + h;
+  }
+  /* ---------- Foils and double-sleeving ---------- */
+  const dsLimit = () => { try { const v = parseFloat(localStorage.getItem("mtg_dsleeve")); return isFinite(v) && v >= 0 ? v : 20; } catch (e) { return 20; } };
+  const money = (v) => (v == null ? "no price" : "A$" + v.toFixed(v >= 10 ? 0 : 2));
+  function sleeveBox(d) {
+    if (!S.rows.length) return "";
+    const l = M.sleeveList(S.rows, d, dsLimit()); if (!l.length) return "";
+    return `<div class="card"><b>Double-sleeve these ${l.reduce((n, x) => n + x.qty, 0)}</b> <span class="muted">(worth ${money(dsLimit())} or more each)</span>${l.map((x) => `<div class="row"><span>${esc(plain(x.name))} <span class="muted">${esc(x.set + " #" + x.cn)}${x.foil ? " foil" : ""}${x.qty > 1 ? " ×" + x.qty : ""}</span></span><b>${money(x.each)}</b></div>`).join("")}</div>`;
+  }
+  function fpOrder() { const names = S.decks.map((d) => d.name || d.slug); const base = S.fpOrder || (S.foilprio && S.foilprio.order) || []; return base.filter((n) => names.includes(n)).concat(names.filter((n) => !base.includes(n))); }
+  function vFoils() {
+    if (!S.rows.length) return emptyMsg("Load the collection first (Data tab).");
+    const lim = dsLimit(), ord = fpOrder(), sg = M.foilSuggestions(S.rows, S.decks, ord, S.cfg);
+    let h = `<div class="card"><b>Double-sleeve limit</b><div class="muted">Cards in a deck binder worth at least this much (AUD, live price when loaded, otherwise the price in your collection) are flagged on the deck page and below.</div>
+      <div class="row"><span>A$</span><input type="number" min="0" step="1" id="dslimit" value="${lim}" style="width:90px"></div></div>`;
+    const per = S.decks.map((d) => ({ d, l: M.sleeveList(S.rows, d, lim) })).filter((x) => x.l.length);
+    h += `<h3>Double-sleeve</h3>` + (per.length ? per.map(({ d, l }) => `<div class="card"><b>${esc(d.name || d.slug)}</b> <span class="muted">${l.reduce((n, x) => n + x.qty, 0)} card${l.reduce((n, x) => n + x.qty, 0) > 1 ? "s" : ""}</span>${l.map((x) => `<div class="row"><span>${esc(plain(x.name))} <span class="muted">${esc(x.set + " #" + x.cn)}${x.foil ? " foil" : ""}${x.qty > 1 ? " ×" + x.qty : ""}</span></span><b>${money(x.each)}</b></div>`).join("")}</div>`).join("") : `<div class="card muted">Nothing in your deck binders is worth ${money(lim)} or more.</div>`);
+    h += `<h3>Deck priority for foils</h3><div class="card"><div class="muted">Top of the list gets the foils first. Suggestions below put the foil copies you own into the highest decks.</div>
+      ${ord.map((n, i) => `<div class="row"><span>${i + 1}. ${esc(n)}</span><span><button class="btn alt" data-act="fpmove" data-i="${i}" data-d="-1" ${i === 0 ? "disabled" : ""}>▲</button><button class="btn alt" data-act="fpmove" data-i="${i}" data-d="1" ${i === ord.length - 1 ? "disabled" : ""}>▼</button></span></div>`).join("")}
+      <div class="row"><button class="btn" data-act="fpsave" ${S.fpDirty ? "" : "disabled"}>Save order</button><span class="muted">${esc(S.fpMsg || (S.foilprio ? "Saved " + (S.foilprio.updated || "") : "Not saved yet"))}</span></div></div>`;
+    h += `<h3>Foil suggestions</h3>`;
+    if (!sg.list.length) return h + `<div class="card muted">No foil copy you own could go into a deck that currently has a normal copy.</div>`;
+    h += `<div class="muted">Each line: a normal copy sitting in a deck, and a foil copy of the same card you own elsewhere. Nothing is changed; do the move in ManaBox and in the sleeves.</div>`;
+    for (const dn of sg.order) {
+      const l = sg.list.filter((x) => x.deck === dn); if (!l.length) continue;
+      h += `<div class="card"><b>${esc(dn)}</b> <span class="muted">${l.length} foil${l.length > 1 ? "s" : ""} available</span>` + l.map((x) => `<div style="margin-top:6px">${esc(plain(x.name))}
+        <div class="muted">${x.kind === "free" ? `Foil is in <b>${esc(x.foil.binder)}</b> (free)` : `Foil is in <b>${esc(x.foil.binder)}</b> (lower priority): swap its foil for your normal one from ${esc(dn)}`} · foil ${esc(x.foil.set + " #" + x.foil.cn)}${x.foil.etched ? " etched" : ""} ${money(x.foil.each)} · deck copy ${esc(x.have.set + " #" + x.have.cn)} ${money(x.have.each)}${x.samePrint ? "" : " · <b>different printing, check the look</b>"}</div></div>`).join("") + `</div>`;
+    }
+    return h;
+  }
+  async function fpSave() {
+    if (!S.wtoken) { S.fpMsg = "Saving needs a write token (Data tab)."; render(); return; }
+    S.fpMsg = "Saving…"; render();
+    const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/foilprio.json`, hd = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
+    try {
+      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: hd }); let sha;
+      if (cur.ok) sha = (await cur.json()).sha; else if (cur.status !== 404) throw new Error("Couldn't read the saved order (" + cur.status + ").");
+      const data = { order: fpOrder(), updated: new Date().toISOString().slice(0, 10), by: S.who || "" };
+      const r = await fetch(url, { method: "PUT", headers: hd, body: JSON.stringify({ message: `Foil priority saved${S.who ? " [" + S.who + "]" : ""}`, content: b64(JSON.stringify(data, null, 1) + "\n"), sha, branch: S.cfg.branch }) });
+      if (!r.ok) throw new Error("GitHub " + r.status);
+      S.foilprio = data; S.fpOrder = null; S.fpDirty = false; S.fpMsg = "Saved.";
+    } catch (e) { S.fpMsg = "Save failed: " + e.message; }
+    render();
   }
   function delZone(d) {
     const st = S.del && S.del.slug === d.slug ? S.del : null;
@@ -1744,12 +1791,16 @@
     if (Date.now() < S.noClickUntil) { ev.preventDefault(); ev.stopPropagation(); return; }
     if (ev.target.closest && ev.target.closest("#refresh")) { forceRefresh(); return; }
     const tabBtn = ev.target.closest("#tabs button");
-    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.tk = null; S.sc = null; S.land = false; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
+    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.tk = null; S.sc = null; S.land = false; S.fp = false; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
     const el = ev.target.closest("[data-act]");
     if (!el) return;
     const a = el.dataset.act;
     if (a === "toggle") { const o = el.querySelector("[data-o]"); if (o) o.hidden = !o.hidden; }
     else if (a === "open") { S.del = null; S.tk = null; S.deck = el.dataset.slug; pushNav("deck"); render(); window.scrollTo(0, 0); }
+    else if (a === "fpopen") { S.fp = true; S.deck = null; pushNav("foils"); render(); window.scrollTo(0, 0); }
+    else if (a === "fpback") { S.fp = false; popNav("foils"); render(); }
+    else if (a === "fpmove") { const o = fpOrder(), i = +el.dataset.i, j = i + +el.dataset.d; if (j >= 0 && j < o.length) { [o[i], o[j]] = [o[j], o[i]]; S.fpOrder = o; S.fpDirty = true; S.fpMsg = ""; render(); } }
+    else if (a === "fpsave") { await fpSave(); }
     else if (a === "del1") { S.del = { slug: el.dataset.slug, text: "" }; render(); setTimeout(() => { const i = $("#delname"); if (i) { i.scrollIntoView({ block: "center" }); i.focus(); } }, 0); }
     else if (a === "delcancel") { S.del = null; render(); }
     else if (a === "del2") {
@@ -1943,6 +1994,7 @@
     if (ev.target.id === "setfind") { S.sv.find = ev.target.value; clearTimeout(S._setT); S._setT = setTimeout(() => { render(); const i = $("#setfind"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 250); return; }
     if (ev.target.id === "colq") { CF().q = ev.target.value; CF().limit = 120; peekHide(); clearTimeout(S._colT); S._colT = setTimeout(() => { const r = $("#colres"); if (r) r.innerHTML = colResults(); }, 150); return; }
     if (ev.target.id === "delname" && S.del) { S.del.text = ev.target.value; const d = deckBySlug(S.del.slug), g = $("#delgo"); if (d && g) g.disabled = !(ev.target.value.trim().toLowerCase() === (d.name || d.slug).trim().toLowerCase()); }
+    if (ev.target.id === "dslimit") { const v = parseFloat(ev.target.value); if (isFinite(v) && v >= 0) { try { localStorage.setItem("mtg_dsleeve", String(v)); } catch (e) { /* ignore */ } clearTimeout(S._dsT); S._dsT = setTimeout(() => { render(); const i2 = $("#dslimit"); if (i2) { i2.focus(); try { i2.setSelectionRange(i2.value.length, i2.value.length); } catch (e) { /* number input */ } } }, 500); } }
     if (ev.target.id === "chq" && S.ch) { S.ch.q = ev.target.value; peekHide(); $("#chres").innerHTML = chooserResults(); }
   });
   document.addEventListener("change", async (ev) => {

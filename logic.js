@@ -374,6 +374,47 @@
     return v == null ? null : v * LIVE.rate;
   };
   const rowAUD = (r) => { const lv = liveAUD(r); if (lv != null) return lv; const v = parseFloat(r.price); return isFinite(v) && v >= 0 && (!r.cur || /^AUD$/i.test(r.cur)) && String(r.price).trim() !== "" ? v : null; };
+
+  /* ---------- Foils and sleeves ---------- */
+  // Cards physically in a deck binder worth double-sleeving (price of that copy >= limit, AUD).
+  function sleeveList(rows, deck, limit) {
+    const out = [];
+    for (const r of rows || []) {
+      if (norm(r.btype) !== "deck" || norm(r.binder) !== norm(deck.name || "") || isBasic(r.name)) continue;
+      const v = rowAUD(r); if (v == null || v < limit) continue;
+      out.push({ name: r.name, set: (r.set || "").toUpperCase(), cn: r.cn || "", foil: isFoilRow(r), qty: r.qty, each: v });
+    }
+    return out.sort((a, b) => b.each - a.each);
+  }
+  // For each deck in priority order: normal copies in the deck for which you own a foil copy that is free (in a free binder),
+  // or sits in a lower-priority deck (then the two decks swap copies). Each foil copy is used once.
+  function foilSuggestions(rows, decks, order, cfg) {
+    const free = new Set((cfg.freeBinders || []).map(norm)), rank = new Map();
+    const names = decks.map((d) => d.name || d.slug);
+    const ord = (order || []).filter((n) => names.includes(n)).concat(names.filter((n) => !(order || []).includes(n)));
+    ord.forEach((n, i) => rank.set(norm(n), i));
+    const used = new Map(), out = [], keyOfRow = (r) => norm(r.name);
+    const take = (r, n) => used.set(r, (used.get(r) || 0) + n), left = (r) => r.qty - (used.get(r) || 0);
+    const foils = rows.filter((r) => isFoilRow(r) && !isBasic(r.name));
+    for (const dn of ord) {
+      const mine = rows.filter((r) => norm(r.btype) === "deck" && norm(r.binder) === norm(dn) && !isFoilRow(r) && !isBasic(r.name));
+      for (const r of mine) {
+        for (let c = 0; c < r.qty; c++) {
+          const cands = foils.filter((f) => keyOfRow(f) === keyOfRow(r) && left(f) > 0 && norm(f.binder) !== norm(dn));
+          let src = cands.find((f) => free.has(norm(f.binder)));
+          let kind = "free";
+          if (!src) {
+            src = cands.filter((f) => norm(f.btype) === "deck" && rank.has(norm(f.binder)) && rank.get(norm(f.binder)) > rank.get(norm(dn))).sort((a, b) => rank.get(norm(b.binder)) - rank.get(norm(a.binder)))[0];
+            kind = "deck";
+          }
+          if (!src) continue;
+          take(src, 1);
+          out.push({ deck: dn, name: r.name, have: { set: (r.set || "").toUpperCase(), cn: r.cn || "", each: rowAUD(r) }, foil: { binder: src.binder, set: (src.set || "").toUpperCase(), cn: src.cn || "", each: rowAUD(src), etched: /etched/i.test(src.foil || "") }, kind, samePrint: (r.set || "").toUpperCase() === (src.set || "").toUpperCase() && String(r.cn) === String(src.cn) });
+        }
+      }
+    }
+    return { order: ord, list: out };
+  }
   function buildTrades(ctx, reserve) {
     const { own, claims, cfg, idx } = ctx;
     const free = new Set(cfg.freeBinders.map(norm));
@@ -964,7 +1005,7 @@
     artUrl, artByName, pickSid,
     DEFAULT_CONFIG, norm, isBasic, parseCSV, parseCollection, csvEscape,
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
-    pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
+    sleeveList, foilSuggestions, pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
     eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, basicNames, basicHolders, tidyPlan, printKey, tickEntries, snapPrint, matchTitle, matchAnyTitle, fuzzyEntry, lev, indexBySetCn, fixDigits, cnNum, parseCollector, matchScan, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
   };
