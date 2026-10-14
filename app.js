@@ -643,19 +643,24 @@
     return h + `</div>`;
   }
   /* ---------- check a physical deck (tick list + camera scanner) ---------- */
-  const TK_MODES = { physical: "As it is physically (ManaBox + swaps made)", current: "List in ManaBox", swaps: "With all confirmed swaps" };
+  const TK_MODES = { qa: "QA: ManaBox list + every swap", physical: "As it is physically (ManaBox + swaps made)", current: "List in ManaBox", swaps: "With all confirmed swaps" };
   const tkKey = (slug, mode) => "mtg_tick_" + slug + "_" + mode;
   function tkLoad(slug, mode) { try { const j = JSON.parse(localStorage.getItem(tkKey(slug, mode)) || "null"); if (j && j.got) { j.pf = j.pf || {}; return j; } } catch (e) { /* none */ } return { got: {}, diff: {}, extra: [], pf: {}, at: "" }; }
   function tkSave() { const t = S.tk; if (!t) return; t.st.at = new Date().toISOString(); try { localStorage.setItem(tkKey(t.slug, t.mode), JSON.stringify(t.st)); } catch (e) { /* ignore */ } }
+  // QA mode: the ManaBox list plus the IN card of every open swap that ManaBox doesn't show yet (so one scan covers the list and the swaps).
+  function tkQaIns(d) { const m = M.deckMap(d, S.idx), add = new Map(); for (const p of M.activePencils(d)) { if (!p.in) continue; const k = M.keyOf(S.idx, p.in); if (m.has(k)) continue; const e = add.get(k) || { key: k, name: M.resolve ? M.resolve(S.idx, p.in) || p.in : p.in, qty: 0 }; e.qty += 1; add.set(k, e); } return add; }
   function tkList(d, mode) {
+    if (mode === "qa") return [...M.deckMap(d, S.idx).values(), ...tkQaIns(d).values()].map((c) => ({ key: c.key, name: c.name, qty: c.qty }));
     const l = mode === "swaps" ? M.applySwaps(d, S.idx, { only: ["approved", "made"] }) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
     return l.map((c) => ({ key: c.key || M.keyOf(S.idx, c.name), name: c.name, qty: c.qty }));
   }
   function tkOpen(d, mode) {
-    mode = mode || (S.tk && S.tk.mode) || "physical";
+    mode = mode || (S.tk && S.tk.mode) || "qa";
     const entries = M.tickEntries(d, tkList(d, mode), S.own, S.cfg);
     const kind = (k) => ((M.cardInfo(S.idx, k) || {}).frontType || "").replace(/^(Legendary |Basic |Snow |Token )+/, "").match(/Land|Creature|Planeswalker|Instant|Sorcery|Artifact|Enchantment|Battle/);
     entries.forEach((e) => { const m = kind(e.key); e.type = m ? m[0] : "Other"; });
+    const inKeys = mode === "qa" ? new Set(tkQaIns(d).keys()) : new Set();
+    entries.forEach((e) => { e.swapIn = inKeys.has(e.key); });
     S.tk = { slug: d.slug, mode, entries, st: tkLoad(d.slug, mode), filter: (S.tk && S.tk.filter) || "todo", msg: "" };
   }
   const tkGot = (e) => (S.tk.st.got[e.id] || 0);
@@ -691,10 +696,61 @@
     h += `<div class="card"><b>Cards that shouldn't be in this deck</b><div class="muted">Found something in the deck that isn't on the list? Add it here. It is only noted in this check.</div>
       <div class="row"><input type="text" id="tkx" placeholder="Card name" autocomplete="off" style="flex:1"><button class="btn" data-act="tkxadd">Add</button></div>
       ${t.st.extra.map((x, i) => `<div class="row"><span>${esc(x.name)}${x.seen ? ` <span class="muted">(${esc(x.seen)})</span>` : ""}</span><button class="btn alt" data-act="tkxdel" data-i="${i}">Remove</button></div>`).join("")}</div>
-      <div class="card"><b>Results</b><div class="row"><button class="btn" data-act="tkreport">Missing &amp; extra report</button><button class="btn" data-act="tkaudit">Printing audit (fix in ManaBox)</button><button class="btn alt" data-act="tklist">List of what's physically here</button></div></div>`;
+      <div class="card"><b>Results</b><div class="row">${t.mode === "qa" ? `<button class="btn" data-act="tkqa">ManaBox to-do &amp; swap status</button>` : ""}<button class="btn alt" data-act="tkreport">Missing &amp; extra report</button><button class="btn" data-act="tkaudit">Printing audit (fix in ManaBox)</button><button class="btn alt" data-act="tklist">List of what's physically here</button></div></div>`;
     return h;
   }
+  // What the scan shows for each open swap, compared with what the app records.
+  function tkSwapEval(d) {
+    const t = S.tk, m = M.deckMap(d, S.idx), out = [];
+    const gotK = (k) => t.entries.filter((e) => e.key === k).reduce((s2, e) => s2 + Math.min(e.qty, tkGot(e)), 0);
+    const isBasic = (n) => /^(Snow-Covered )?(Plains|Island|Swamp|Mountain|Forest|Wastes)$/i.test(n || "");
+    const pens = M.activePencils(d);
+    pens.forEach((p, i) => {
+      const ko = p.out ? M.keyOf(S.idx, p.out) : "", ki = p.in ? M.keyOf(S.idx, p.in) : "", rec = M.pencilStatus(p);
+      const reflected = M.swapShown(d, p, S.idx, m);
+      const outHave = ko ? gotK(ko) >= (m.get(ko) ? m.get(ko).qty : 1) : false;
+      const inNeed = ki && m.get(ki) ? m.get(ki).qty : 1, inHave = ki ? gotK(ki) >= inNeed : false;
+      const basic = (p.out && isBasic(p.out)) || (p.in && isBasic(p.in));
+      let state = !p.in ? "cut" : outHave && inHave ? "both" : inHave ? "made" : outHave || !p.out ? "pending" : "neither";
+      if (!p.out && p.in) state = inHave ? "made" : "pending";
+      out.push({ i: i + 1, p, state, rec, reflected, basic, ko, ki });
+    });
+    return out;
+  }
+  const SW_STATE = { made: "MADE (IN seen, OUT not in the deck)", pending: "PENDING (OUT still in the deck, IN not seen)", both: "BOTH cards are in the deck (OUT should have left)", neither: "NEITHER seen (OUT gone, IN not found; scan more or look in your piles)", cut: "OUT only" };
+  function tkQaReport() {
+    const t = S.tk, d = deckBySlug(t.slug), sw = tkSwapEval(d), L = [];
+    const { have, want } = tkTotals();
+    const nm = (e) => plain(e.name) + (e.unknown ? "" : " (" + e.set + " #" + e.cn + (e.foil ? " foil" : "") + ")");
+    const madeOut = new Set(sw.filter((x) => x.state === "made" && x.ko).map((x) => x.ko)), madeIn = new Set(sw.filter((x) => x.state === "made" && x.ki).map((x) => x.ki));
+    const todo = [];
+    for (const x of sw) if (x.state === "made" && !x.reflected) {
+      if (x.p.out) todo.push(`TAKE OUT of the "${d.name}" binder: ${plain(x.p.out)}  (swap #${x.i}, now not in the deck)`);
+      if (x.p.in) todo.push(`PUT INTO the "${d.name}" binder: ${plain(x.p.in)}  (swap #${x.i}, now in the deck)`);
+    }
+    const dif = t.entries.filter((e) => t.st.diff[e.id] && !e.swapIn);
+    for (const e of dif) todo.push(`CHANGE PRINTING: ${plain(e.name)} — ManaBox has ${e.set} #${e.cn}${e.foil ? " foil" : ""}, physical is ${t.st.diff[e.id].join(", ")}`);
+    for (const e of t.entries.filter((e) => tkGot(e) > 0 && tkFoil(e) !== e.foil)) todo.push(`CHANGE FOIL: ${plain(e.name)} (${e.set} #${e.cn}) — ManaBox says ${e.foil ? "foil" : "normal"}, you flagged ${tkFoil(e) ? "foil" : "normal"}`);
+    for (const x of t.st.extra) todo.push(`PUT INTO the "${d.name}" binder (in the deck, not on the ManaBox list): ${x.name}${x.seen ? " (" + x.seen + ")" : ""}`);
+    const miss = t.entries.filter((e) => !e.swapIn && tkGot(e) < e.qty && !(madeOut.has(e.key) && tkGot(e) === 0));
+    for (const e of miss) todo.push(`NOT FOUND (on the ManaBox list, not scanned): ${e.qty - Math.min(e.qty, tkGot(e))}× ${nm(e)}`);
+    L.push(`${d.name || d.slug} — QA check`, `${have} of ${want} cards found (ManaBox list + swap INs). Anything not scanned counts as "not in the deck".`, "", "TO UPDATE IN MANABOX", todo.length ? "" : "  Nothing. ManaBox matches the deck.");
+    todo.forEach((x, i) => L.push(`  ${i + 1}. ${x}`));
+    L.push("", "SWAPS");
+    if (!sw.length) L.push("  No open swaps.");
+    for (const x of sw) {
+      let note = "";
+      const recv = x.rec === "approved" ? "approved" : x.rec;
+      if (x.basic) note = "basic land: a scan can't tell copies apart, check by hand.";
+      else if (x.state === "made") note = recv === "made" ? (x.reflected ? "matches the app; ManaBox already shows it." : "matches the app (made); ManaBox still needs updating.") : `app says ${recv} → mark it MADE in the app.`;
+      else if (x.state === "pending") note = recv === "made" ? "app says MADE but the scan doesn't show it → check." : `matches the app (${recv}).`;
+      else note = "doesn't match what the app records (" + recv + ") → check.";
+      L.push(`  #${x.i} ${x.p.out ? plain(x.p.out) : "(nothing)"} → ${x.p.in ? plain(x.p.in) : "(nothing)"}: ${SW_STATE[x.state]}. ${note}`);
+    }
+    return L.join("\n") + "\n";
+  }
   function tkReport(kind) {
+    if (kind === "qa") return tkQaReport();
     const t = S.tk, d = deckBySlug(t.slug), lines = [];
     const sw = (e) => `${e.name}${e.unknown ? "" : " (" + e.set + " #" + e.cn + (e.foil ? " foil" : "") + ")"}`;
     if (kind === "list") {
@@ -1677,6 +1733,7 @@
     else if (a === "tkxadd") { const v = ($("#tkx").value || "").trim(); if (v) { const k = M.keyOf(S.idx, v), nm = (M.cardInfo(S.idx, k) || {}).name || v; S.tk.st.extra.push({ name: nm, seen: "" }); tkSave(); render(); } }
     else if (a === "tkxdel") { S.tk.st.extra.splice(+el.dataset.i, 1); tkSave(); render(); }
     else if (a === "tkaudit") showOut((deckBySlug(S.tk.slug).name || "") + " — printing audit", tkReport("audit"), S.tk.slug + "_printing_audit.txt");
+    else if (a === "tkqa") showOut((deckBySlug(S.tk.slug).name || "") + " — QA check", tkReport("qa"), S.tk.slug + "_qa.txt");
     else if (a === "tkreport") showOut((deckBySlug(S.tk.slug).name || "") + " — check report", tkReport("report"), S.tk.slug + "_check.txt");
     else if (a === "tklist") showOut((deckBySlug(S.tk.slug).name || "") + " — what's physically here", tkReport("list"), S.tk.slug + "_physical.txt");
     else if (a === "tkscan") tkScan("tick");
