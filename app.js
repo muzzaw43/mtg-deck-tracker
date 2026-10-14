@@ -177,6 +177,22 @@
     if (!r.ok) throw new Error("Wishlist save failed: GitHub " + r.status);
     S.wl = list;
   }
+  async function deleteDeckFile(d) {
+    if (!S.wtoken) throw new Error("Deleting needs a write token — add it in Data (Contents: read and write, only " + S.cfg.dataRepo + ").");
+    const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/decks/${d.slug}.json`;
+    const hd = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
+    const del = (sha) => fetch(url, { method: "DELETE", headers: hd, body: JSON.stringify({ message: `Delete deck: ${d.name || d.slug}${S.who ? " [" + S.who + "]" : ""}`, sha, branch: S.cfg.branch }) });
+    let r = await del(d._sha);
+    if (r.status === 409 || r.status === 422) {
+      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: hd });
+      if (cur.status === 404) return; // already gone
+      if (!cur.ok) throw new Error("Couldn't re-read the deck file (" + cur.status + ").");
+      r = await del((await cur.json()).sha);
+    }
+    if (r.status === 404) return;
+    if (r.status === 401 || r.status === 403) throw new Error("GitHub refused the delete (" + r.status + ") — the write token needs Contents: read and write on " + S.cfg.dataRepo + ".");
+    if (!r.ok) throw new Error("Delete failed: GitHub " + r.status);
+  }
   async function saveDeck(d, message) {
     if (!S.wtoken) throw new Error("Saving needs a write token — add it in Data (Contents: read and write, only " + S.cfg.dataRepo + ").");
     const body = { ...d }; delete body.slug; delete body._sha; delete body._orig; delete body._mb;
@@ -1105,7 +1121,18 @@
       }
       cards += `</div>`;
     }
+    h += delZone(d);
     return pre + cards + h;
+  }
+  function delZone(d) {
+    const st = S.del && S.del.slug === d.slug ? S.del : null;
+    if (!st) return `<div class="dangerzone"><h3>Delete this deck</h3><div class="muted">Removes the deck's file from the data repo. Your ManaBox collection isn't touched.</div><button class="btn danger" data-act="del1" data-slug="${esc(d.slug)}">Delete this deck…</button></div>`;
+    const nm = d.name || d.slug;
+    return `<div class="dangerzone armed"><h3>Are you sure?</h3>
+      <div>This permanently deletes <b>${esc(nm)}</b> (its list, ${(d.pencilled || []).length} pencilled/made swaps and comments) from the data repo. It can only be recovered from GitHub history.</div>
+      <div class="muted">Step 2 of 2 — type the deck name exactly to confirm:</div>
+      <input id="delname" class="inp" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(nm)}" value="${esc(st.text || "")}">
+      <div class="row"><button class="btn danger" id="delgo" data-act="del2" data-slug="${esc(d.slug)}" ${(st.text || "").trim().toLowerCase() === nm.trim().toLowerCase() && !S.saving ? "" : "disabled"}>${S.saving ? "Deleting…" : "Permanently delete"}</button><button class="btn" data-act="delcancel">Cancel</button></div></div>`;
   }
   function chooserResults() {
     const c = S.ch, d = deckBySlug(c.slug), q = norm(c.q || ""), m = M.deckMap(d, S.idx);
@@ -1623,8 +1650,18 @@
     if (!el) return;
     const a = el.dataset.act;
     if (a === "toggle") { const o = el.querySelector("[data-o]"); if (o) o.hidden = !o.hidden; }
-    else if (a === "open") { S.tk = null; S.deck = el.dataset.slug; pushNav("deck"); render(); window.scrollTo(0, 0); }
-    else if (a === "back") { S.tk = null; S.deck = null; popNav("deck"); render(); }
+    else if (a === "open") { S.del = null; S.tk = null; S.deck = el.dataset.slug; pushNav("deck"); render(); window.scrollTo(0, 0); }
+    else if (a === "del1") { S.del = { slug: el.dataset.slug, text: "" }; render(); setTimeout(() => { const i = $("#delname"); if (i) { i.scrollIntoView({ block: "center" }); i.focus(); } }, 0); }
+    else if (a === "delcancel") { S.del = null; render(); }
+    else if (a === "del2") {
+      const d = deckBySlug(el.dataset.slug), nm = d ? (d.name || d.slug) : "";
+      if (!d || !S.del || S.del.slug !== d.slug || (S.del.text || "").trim().toLowerCase() !== nm.trim().toLowerCase() || S.saving) return;
+      S.saving = "Deleting…"; S.error = ""; render();
+      try { await deleteDeckFile(d); S.decks = S.decks.filter((x) => x.slug !== d.slug); S.log.push(`Deleted deck ${nm}`); S.del = null; S.tk = null; S.deck = null; popNav("deck"); }
+      catch (e) { S.error = e.message; }
+      S.saving = ""; status(); render(); window.scrollTo(0, 0);
+    }
+    else if (a === "back") { S.del = null; S.tk = null; S.deck = null; popNav("deck"); render(); }
     else if (a === "level") { S.level = el.dataset.l; render(); }
     else if (a === "closeout") { S.out = null; render(); }
     else if (a === "copy") { const ok = await copyText(S.out.text); el.textContent = ok ? "Copied ✓" : "Select the text and copy it manually"; }
@@ -1805,6 +1842,7 @@
     if (ev.target.id === "setq") { S.sv.q = ev.target.value; S.sv.limit = 200; peekHide(); clearTimeout(S._setT); S._setT = setTimeout(() => { const cl = setChecklist(S.sv.code, S.sv.mode), r = $("#setres"); if (cl && r) r.innerHTML = setResults(cl); }, 150); return; }
     if (ev.target.id === "setfind") { S.sv.find = ev.target.value; clearTimeout(S._setT); S._setT = setTimeout(() => { render(); const i = $("#setfind"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 250); return; }
     if (ev.target.id === "colq") { CF().q = ev.target.value; CF().limit = 120; peekHide(); clearTimeout(S._colT); S._colT = setTimeout(() => { const r = $("#colres"); if (r) r.innerHTML = colResults(); }, 150); return; }
+    if (ev.target.id === "delname" && S.del) { S.del.text = ev.target.value; const d = deckBySlug(S.del.slug), g = $("#delgo"); if (d && g) g.disabled = !(ev.target.value.trim().toLowerCase() === (d.name || d.slug).trim().toLowerCase()); }
     if (ev.target.id === "chq" && S.ch) { S.ch.q = ev.target.value; peekHide(); $("#chres").innerHTML = chooserResults(); }
   });
   document.addEventListener("change", async (ev) => {
