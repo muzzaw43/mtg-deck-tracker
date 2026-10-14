@@ -728,14 +728,20 @@
       if (x.p.out) todo.push(`TAKE OUT of the "${d.name}" binder: ${plain(x.p.out)}  (swap #${x.i}, now not in the deck)`);
       if (x.p.in) todo.push(`PUT INTO the "${d.name}" binder: ${plain(x.p.in)}  (swap #${x.i}, now in the deck)`);
     }
-    const dif = t.entries.filter((e) => t.st.diff[e.id] && !e.swapIn);
-    for (const e of dif) todo.push(`CHANGE PRINTING: ${plain(e.name)} — ManaBox has ${e.set} #${e.cn}${e.foil ? " foil" : ""}, physical is ${t.st.diff[e.id].join(", ")}`);
+    const dif = t.entries.filter((e) => t.st.diff[e.id] && !e.swapIn), sameLook = [];
+    for (const e of dif) {
+      const lk = tkLooks(e);
+      if (lk.differs.length) todo.push(`DIFFERENT LOOK: ${plain(e.name)} — ManaBox has ${e.set} #${e.cn}${e.foil ? " foil" : ""}, physical is ${lk.differs.join(", ")} (different frame, border or art)`);
+      if (lk.unknown.length) todo.push(`CHECK LOOK: ${plain(e.name)} — ManaBox has ${e.set} #${e.cn}, physical is ${lk.unknown.join(", ")} (couldn't compare the look; check by eye)`);
+      if (lk.same.length && !lk.differs.length && !lk.unknown.length) sameLook.push(`${plain(e.name)} (${e.set} #${e.cn} vs ${lk.same.join(", ")})`);
+    }
     for (const e of t.entries.filter((e) => tkGot(e) > 0 && tkFoil(e) !== e.foil)) todo.push(`CHANGE FOIL: ${plain(e.name)} (${e.set} #${e.cn}) — ManaBox says ${e.foil ? "foil" : "normal"}, you flagged ${tkFoil(e) ? "foil" : "normal"}`);
     for (const x of t.st.extra) todo.push(`PUT INTO the "${d.name}" binder (in the deck, not on the ManaBox list): ${x.name}${x.seen ? " (" + x.seen + ")" : ""}`);
     const miss = t.entries.filter((e) => !e.swapIn && tkGot(e) < e.qty && !(madeOut.has(e.key) && tkGot(e) === 0));
     for (const e of miss) todo.push(`NOT FOUND (on the ManaBox list, not scanned): ${e.qty - Math.min(e.qty, tkGot(e))}× ${nm(e)}`);
     L.push(`${d.name || d.slug} — QA check`, `${have} of ${want} cards found (ManaBox list + swap INs). Anything not scanned counts as "not in the deck".`, "", "TO UPDATE IN MANABOX", todo.length ? "" : "  Nothing. ManaBox matches the deck.");
     todo.forEach((x, i) => L.push(`  ${i + 1}. ${x}`));
+    if (sameLook.length) L.push("", `SAME LOOK, DIFFERENT SET/NUMBER (ignored): ${sameLook.length}`, ...sameLook.map((x) => "  " + x));
     L.push("", "SWAPS");
     if (!sw.length) L.push("  No open swaps.");
     for (const x of sw) {
@@ -764,8 +770,8 @@
     const miss = kind === "audit" ? [] : t.entries.filter((e) => tkGot(e) < e.qty);
     if (kind !== "audit") lines.push(miss.length ? "MISSING:" : "Nothing missing.", ...miss.map((e) => `  ${e.qty - Math.min(e.qty, tkGot(e))}× ${sw(e)}`));
     const cf = (e, s) => ((t.st.conf && t.st.conf[e.id] && t.st.conf[e.id][s]) === "check" ? "  (check by eye)" : "");
-    const dif = t.entries.filter((e) => t.st.diff[e.id]);
-    if (dif.length) lines.push("", "FIX IN MANABOX (the physical card is a different printing from the list):", ...dif.map((e) => `  ${plain(e.name)}: ManaBox has ${e.set} #${e.cn}${e.foil ? " foil" : ""} → physical is ${t.st.diff[e.id].map((s) => s + cf(e, s)).join(", ")}`));
+    const dif = t.entries.filter((e) => { if (!t.st.diff[e.id]) return false; const lk = tkLooks(e); return lk.differs.length || lk.unknown.length; });
+    if (dif.length) lines.push("", "FIX IN MANABOX (the physical card looks different from the list: other frame, border or art; same-looking reprints are ignored):", ...dif.map((e) => `  ${plain(e.name)}: ManaBox has ${e.set} #${e.cn}${e.foil ? " foil" : ""} → physical is ${t.st.diff[e.id].map((s) => s + cf(e, s)).join(", ")}`));
     const np = t.entries.filter((e) => tkGot(e) > 0 && t.st.np && t.st.np[e.id]);
     if (np.length) lines.push("", "PRINTING NOT CONFIRMED (counted by name or picture; the set and number were never read, so a wrong printing in ManaBox wouldn't show):", ...np.map((e) => `  ${plain(e.name)} (list: ${e.set} #${e.cn})`));
     const fd = t.entries.filter((e) => tkGot(e) > 0 && tkFoil(e) !== e.foil);
@@ -795,6 +801,43 @@
   (function () { try { const j = JSON.parse(localStorage.getItem("mtg_prints") || "{}"); for (const k in j) prCache.set(k, j[k]); } catch (e) { /* none */ } })();
   function prSave() {
     try { const ks = [...prCache.keys()].filter((k) => Array.isArray(prCache.get(k))); const o = {}; for (const k of ks.slice(-120)) o[k] = prCache.get(k); localStorage.setItem("mtg_prints", JSON.stringify(o)); } catch (e) { /* ignore */ }
+  }
+  // "Look" of every printing of a card (frame, border, full-art, frame effects, artwork), so a different set number with the same look can be ignored.
+  const lookCache = new Map();
+  (function () { try { const j = JSON.parse(localStorage.getItem("mtg_looks") || "{}"); for (const k in j) lookCache.set(k, j[k]); } catch (e) { /* none */ } })();
+  const lookSave = () => { try { const o = {}; for (const k of [...lookCache.keys()].filter((k) => typeof lookCache.get(k) === "object").slice(-150)) o[k] = lookCache.get(k); localStorage.setItem("mtg_looks", JSON.stringify(o)); } catch (e) { /* ignore */ } };
+  const cnKey = (c) => String(c || "").toLowerCase().replace(/^0+(?=\d)/, "");
+  async function ensureLook(key) {
+    const v = lookCache.get(key); if (v && typeof v === "object") return v;
+    const nm = ((M.cardInfo(S.idx, key) || {}).name || key).split(" // ")[0], out = {};
+    try {
+      let url = "https://api.scryfall.com/cards/search?unique=prints&include_extras=true&include_variants=true&q=" + encodeURIComponent('!"' + nm + '"');
+      for (let i = 0; i < 4 && url; i++) {
+        const r = await fetch(url); if (!r.ok) throw new Error("http " + r.status);
+        const j = await r.json();
+        for (const c of j.data || []) { const f0 = (c.card_faces && c.card_faces[0]) || {}; out[(c.set || "").toUpperCase() + "|" + cnKey(c.collector_number)] = [c.frame, c.border_color, c.full_art ? "full" : "", (c.frame_effects || []).slice().sort().join("+"), c.illustration_id || f0.illustration_id || ""].join("~"); }
+        url = j.has_more ? j.next_page : "";
+      }
+      if (Object.keys(out).length) { lookCache.set(key, out); lookSave(); return out; }
+    } catch (e) { console.log("LOOKFAIL " + e.message); }
+    return null;
+  }
+  // Which of the printings seen for this entry look different from the one ManaBox has? -> { differs:[], same:[], unknown:[] }
+  function tkLooks(e) {
+    const seen = (S.tk.st.diff[e.id] || []), r = { differs: [], same: [], unknown: [] }, L = lookCache.get(e.key);
+    const mine = L && typeof L === "object" ? L[e.set + "|" + cnKey(e.cn)] : null;
+    for (const sn of seen) {
+      const m = /^\s*([A-Za-z0-9]+)\s*#?\s*(\S+)/.exec(sn), theirs = L && typeof L === "object" && m ? L[m[1].toUpperCase() + "|" + cnKey(m[2])] : null;
+      if (!mine || !theirs) r.unknown.push(sn); else if (mine === theirs) r.same.push(sn); else r.differs.push(sn);
+    }
+    return r;
+  }
+  async function tkEnsureLooks() {
+    const keys = [...new Set(S.tk.entries.filter((e) => S.tk.st.diff[e.id]).map((e) => e.key))];
+    if (!keys.length) return;
+    S.busy = "Comparing the look of the printings…"; status();
+    for (const k of keys) await ensureLook(k);
+    S.busy = ""; status();
   }
   // returns an array of [set, cn] once known, "fail" if it couldn't be fetched, or undefined while loading (and starts the fetch)
   function printsFor(key) {
@@ -1732,9 +1775,9 @@
     else if (a === "tkreset") { if (confirm("Clear every tick for this check?")) { S.tk.st = { got: {}, diff: {}, extra: [], pf: {}, at: "" }; tkSave(); render(); } }
     else if (a === "tkxadd") { const v = ($("#tkx").value || "").trim(); if (v) { const k = M.keyOf(S.idx, v), nm = (M.cardInfo(S.idx, k) || {}).name || v; S.tk.st.extra.push({ name: nm, seen: "" }); tkSave(); render(); } }
     else if (a === "tkxdel") { S.tk.st.extra.splice(+el.dataset.i, 1); tkSave(); render(); }
-    else if (a === "tkaudit") showOut((deckBySlug(S.tk.slug).name || "") + " — printing audit", tkReport("audit"), S.tk.slug + "_printing_audit.txt");
-    else if (a === "tkqa") showOut((deckBySlug(S.tk.slug).name || "") + " — QA check", tkReport("qa"), S.tk.slug + "_qa.txt");
-    else if (a === "tkreport") showOut((deckBySlug(S.tk.slug).name || "") + " — check report", tkReport("report"), S.tk.slug + "_check.txt");
+    else if (a === "tkaudit") { await tkEnsureLooks(); showOut((deckBySlug(S.tk.slug).name || "") + " — printing audit", tkReport("audit"), S.tk.slug + "_printing_audit.txt"); }
+    else if (a === "tkqa") { await tkEnsureLooks(); showOut((deckBySlug(S.tk.slug).name || "") + " — QA check", tkReport("qa"), S.tk.slug + "_qa.txt"); }
+    else if (a === "tkreport") { await tkEnsureLooks(); showOut((deckBySlug(S.tk.slug).name || "") + " — check report", tkReport("report"), S.tk.slug + "_check.txt"); }
     else if (a === "tklist") showOut((deckBySlug(S.tk.slug).name || "") + " — what's physically here", tkReport("list"), S.tk.slug + "_physical.txt");
     else if (a === "tkscan") tkScan("tick");
     else if (a === "scopen") { S.sc = scLoad(); S.deck = null; pushNav("scanlist"); render(); window.scrollTo(0, 0); }
