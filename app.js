@@ -1236,15 +1236,16 @@
     return `<div class="card"><b>Double-sleeve these ${l.reduce((n, x) => n + x.qty, 0)}</b> <span class="muted">(worth ${money(dsLimit())} or more each)</span>${l.map((x) => `<div class="row"><span>${esc(plain(x.name))} <span class="muted">${esc(x.set + " #" + x.cn)}${x.foil ? " foil" : ""}${x.qty > 1 ? " ×" + x.qty : ""}</span></span><b>${money(x.each)}</b></div>`).join("")}</div>`;
   }
   function fpOrder() { const names = S.decks.map((d) => d.name || d.slug); const base = S.fpOrder || (S.foilprio && S.foilprio.order) || []; return base.filter((n) => names.includes(n)).concat(names.filter((n) => !base.includes(n))); }
+  function fpDonors() { return S.fpDon || (S.foilprio && S.foilprio.donors) || []; }
   function vFoils() {
     if (!S.rows.length) return emptyMsg("Load the collection first (Data tab).");
-    const lim = dsLimit(), ord = fpOrder(), sg = M.foilSuggestions(S.rows, S.decks, ord, S.cfg);
+    const lim = dsLimit(), ord = fpOrder(), sg = M.foilSuggestions(S.rows, S.decks, ord, S.cfg, fpDonors());
     let h = `<div class="card"><b>Double-sleeve limit</b><div class="muted">Cards in a deck binder worth at least this much (AUD, live price when loaded, otherwise the price in your collection) are flagged on the deck page and below.</div>
       <div class="row"><span>A$</span><input type="number" min="0" step="1" id="dslimit" value="${lim}" style="width:90px"></div></div>`;
     const per = S.decks.map((d) => ({ d, l: M.sleeveList(S.rows, d, lim) })).filter((x) => x.l.length);
     h += `<h3>Double-sleeve</h3>` + (per.length ? per.map(({ d, l }) => `<div class="card"><b>${esc(d.name || d.slug)}</b> <span class="muted">${l.reduce((n, x) => n + x.qty, 0)} card${l.reduce((n, x) => n + x.qty, 0) > 1 ? "s" : ""}</span>${l.map((x) => `<div class="row"><span>${esc(plain(x.name))} <span class="muted">${esc(x.set + " #" + x.cn)}${x.foil ? " foil" : ""}${x.qty > 1 ? " ×" + x.qty : ""}</span></span><b>${money(x.each)}</b></div>`).join("")}</div>`).join("") : `<div class="card muted">Nothing in your deck binders is worth ${money(lim)} or more.</div>`);
-    h += `<h3>Deck priority for foils</h3><div class="card"><div class="muted">Top of the list gets the foils first. Suggestions below put the foil copies you own into the highest decks.</div>
-      ${ord.map((n, i) => `<div class="row"><span>${i + 1}. ${esc(n)}</span><span><button class="btn alt" data-act="fpmove" data-i="${i}" data-d="-1" ${i === 0 ? "disabled" : ""}>▲</button><button class="btn alt" data-act="fpmove" data-i="${i}" data-d="1" ${i === ord.length - 1 ? "disabled" : ""}>▼</button></span></div>`).join("")}
+    h += `<h3>Deck priority for foils</h3><div class="card"><div class="muted">Top of the list gets the foils first. Foils only come from your free binders, unless you tick <b>OK to take foils from this deck</b> on a lower deck.</div>
+      ${ord.map((n, i) => `<div class="row"><span>${i + 1}. ${esc(n)}<br><label class="muted"><input type="checkbox" data-act="fpdon" data-n="${esc(n)}" ${fpDonors().includes(n) ? "checked" : ""}> OK to take foils from this deck</label></span><span><button class="btn alt" data-act="fpmove" data-i="${i}" data-d="-1" ${i === 0 ? "disabled" : ""}>▲</button><button class="btn alt" data-act="fpmove" data-i="${i}" data-d="1" ${i === ord.length - 1 ? "disabled" : ""}>▼</button></span></div>`).join("")}
       <div class="row"><button class="btn" data-act="fpsave" ${S.fpDirty ? "" : "disabled"}>Save order</button><span class="muted">${esc(S.fpMsg || (S.foilprio ? "Saved " + (S.foilprio.updated || "") : "Not saved yet"))}</span></div></div>`;
     h += `<h3>Foil suggestions</h3>`;
     if (!sg.list.length) return h + `<div class="card muted">No foil copy you own could go into a deck that currently has a normal copy.</div>`;
@@ -1263,10 +1264,10 @@
     try {
       const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: hd }); let sha;
       if (cur.ok) sha = (await cur.json()).sha; else if (cur.status !== 404) throw new Error("Couldn't read the saved order (" + cur.status + ").");
-      const data = { order: fpOrder(), updated: new Date().toISOString().slice(0, 10), by: S.who || "" };
+      const data = { order: fpOrder(), donors: fpDonors().filter((n) => S.decks.some((d) => (d.name || d.slug) === n)), updated: new Date().toISOString().slice(0, 10), by: S.who || "" };
       const r = await fetch(url, { method: "PUT", headers: hd, body: JSON.stringify({ message: `Foil priority saved${S.who ? " [" + S.who + "]" : ""}`, content: b64(JSON.stringify(data, null, 1) + "\n"), sha, branch: S.cfg.branch }) });
       if (!r.ok) throw new Error("GitHub " + r.status);
-      S.foilprio = data; S.fpOrder = null; S.fpDirty = false; S.fpMsg = "Saved.";
+      S.foilprio = data; S.fpOrder = null; S.fpDon = null; S.fpDirty = false; S.fpMsg = "Saved.";
     } catch (e) { S.fpMsg = "Save failed: " + e.message; }
     render();
   }
@@ -1800,6 +1801,7 @@
     else if (a === "fpopen") { S.fp = true; S.deck = null; pushNav("foils"); render(); window.scrollTo(0, 0); }
     else if (a === "fpback") { S.fp = false; popNav("foils"); render(); }
     else if (a === "fpmove") { const o = fpOrder(), i = +el.dataset.i, j = i + +el.dataset.d; if (j >= 0 && j < o.length) { [o[i], o[j]] = [o[j], o[i]]; S.fpOrder = o; S.fpDirty = true; S.fpMsg = ""; render(); } }
+    else if (a === "fpdon") { const n = el.dataset.n, cur = fpDonors().slice(); S.fpDon = el.checked ? cur.concat(n) : cur.filter((x) => x !== n); S.fpDirty = true; S.fpMsg = ""; render(); }
     else if (a === "fpsave") { await fpSave(); }
     else if (a === "del1") { S.del = { slug: el.dataset.slug, text: "" }; render(); setTimeout(() => { const i = $("#delname"); if (i) { i.scrollIntoView({ block: "center" }); i.focus(); } }, 0); }
     else if (a === "delcancel") { S.del = null; render(); }

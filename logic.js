@@ -387,8 +387,9 @@
     return out.sort((a, b) => b.each - a.each);
   }
   // For each deck in priority order: normal copies in the deck for which you own a foil copy that is free (in a free binder),
-  // or sits in a lower-priority deck (then the two decks swap copies). Each foil copy is used once.
-  function foilSuggestions(rows, decks, order, cfg) {
+  // or sits in a lower-priority deck that you have ticked as OK to take foils from (then the two decks swap copies). Each foil copy is used once.
+  function foilSuggestions(rows, decks, order, cfg, donors) {
+    const don = new Set((donors || []).map(norm));
     const free = new Set((cfg.freeBinders || []).map(norm)), rank = new Map();
     const names = decks.map((d) => d.name || d.slug);
     const ord = (order || []).filter((n) => names.includes(n)).concat(names.filter((n) => !(order || []).includes(n)));
@@ -404,7 +405,7 @@
           let src = cands.find((f) => free.has(norm(f.binder)));
           let kind = "free";
           if (!src) {
-            src = cands.filter((f) => norm(f.btype) === "deck" && rank.has(norm(f.binder)) && rank.get(norm(f.binder)) > rank.get(norm(dn))).sort((a, b) => rank.get(norm(b.binder)) - rank.get(norm(a.binder)))[0];
+            src = cands.filter((f) => norm(f.btype) === "deck" && rank.has(norm(f.binder)) && don.has(norm(f.binder)) && rank.get(norm(f.binder)) > rank.get(norm(dn))).sort((a, b) => rank.get(norm(b.binder)) - rank.get(norm(a.binder)))[0];
             kind = "deck";
           }
           if (!src) continue;
