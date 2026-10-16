@@ -136,7 +136,7 @@
       S.log.push(`Card DB: ${S.dbCount} cards`);
       if (S.decks.length && S.tab === "data") S.tab = "decks";
     } catch (e) { S.error = e.message; }
-    S.busy = ""; try { recompute(); } catch (e) { S.error = "Loaded, but processing failed: " + e.message; } status(); render();
+    S.busy = ""; try { recompute(); } catch (e) { S.error = "Loaded, but processing failed: " + e.message; } status(); render(); verifyLegality();
     if (S.rows.length) setTimeout(loadLivePrices, 800);
   }
 
@@ -405,6 +405,28 @@
     status(); render();
   }
 
+  // The card DB's "not Commander-legal" flag is unreliable, so check the flagged cards that are in a deck (or owned) against Scryfall and remember the answer.
+  async function verifyLegality() {
+    if (!S.idx) return;
+    let cache = {}; try { cache = JSON.parse(localStorage.getItem("mtg_legal") || "{}"); } catch (e) { cache = {}; }
+    const now = Date.now(), fresh = (v) => v && now - v.t < 14 * 864e5;
+    const keys = new Set();
+    for (const d of S.decks) for (const k of M.deckMap(d, S.idx).keys()) keys.add(k);
+    for (const k of S.own.keys()) keys.add(k);
+    const need = [...keys].filter((k) => { const db = S.idx.db[k]; return db && db.some((f) => f.commanderLegal === false) && !fresh(cache[k]); });
+    const apply = () => { const o = {}; for (const k in cache) if (fresh(cache[k])) o[k] = { ok: cache[k].ok, status: cache[k].status }; M.setLegal(o); };
+    apply(); try { recompute(); } catch (e) { /* ignore */ }
+    let changed = false;
+    for (const k of need.slice(0, 120)) {
+      try {
+        const r = await fetch("https://api.scryfall.com/cards/named?exact=" + encodeURIComponent(k.split(" // ")[0])); if (!r.ok) { if (r.status === 404) continue; break; }
+        const st = ((await r.json()).legalities || {}).commander; if (!st) continue;
+        cache[k] = { ok: st === "legal", status: st, t: now }; changed = true;
+      } catch (e) { break; }
+      await new Promise((res) => setTimeout(res, 110));
+    }
+    if (changed) { try { localStorage.setItem("mtg_legal", JSON.stringify(cache)); } catch (e) { /* ignore */ } apply(); try { recompute(); } catch (e) { /* ignore */ } if (!document.activeElement.matches("input,textarea,select")) render(); }
+  }
   function recompute() {
     S.setIdx = null;
     if (!S.idx) { S.own = new Map(); S.checks = []; S.wlEval = []; return; }

@@ -97,6 +97,9 @@
   }
   const keyOf = (idx, name) => resolve(idx, name) || "?" + norm(name);
 
+  // Scryfall-checked Commander legality for cards the DB flags: { key: { ok: bool, status: "banned" | "not_legal" | "legal" | ... } }
+  let LEGAL = {};
+  const setLegal = (o) => { LEGAL = o || {}; };
   function cardInfo(idx, key) {
     const faces = idx && idx.db[key];
     if (!faces || !faces.length) return null;
@@ -110,7 +113,8 @@
       mv: faces[0].manaValue,
       ci,
       text: faces.map((f) => (faces.length > 1 && f.faceName ? f.faceName + ": " : "") + (f.text || "")).join("\n——\n"),
-      legal: faces.every((f) => f.commanderLegal !== false),
+      legal: LEGAL[key] ? LEGAL[key].ok : faces.every((f) => f.commanderLegal !== false),
+      legalChecked: LEGAL[key] ? LEGAL[key].status : "",
       colors: (faces[0].colors || "").split(",").map((s) => s.trim()).filter(Boolean),
       pt: faces[0].power != null && faces[0].power !== "" ? faces[0].power + "/" + faces[0].toughness : "",
       keywords: faces.map((f) => f.keywords || "").filter(Boolean).join(", "),
@@ -264,7 +268,10 @@
       for (const [key, e] of m) {
         const info = cardInfo(idx, key);
         if (!info) { add("error", d, e.name, "Not found in the card DB"); continue; }
-        if (info.legal === false) add("info", d, info.name, "The card DB flags this as not Commander-legal. That flag looks unreliable for some cards (it also marks plain legal cards), so double-check it before acting on it.");
+        if (info.legal === false) {
+          if (info.legalChecked) add("warn", d, info.name, `Scryfall confirms this is ${info.legalChecked.replace(/_/g, " ")} in Commander.`);
+          else add("info", d, info.name, "The card DB flags this as not Commander-legal, but that flag is unreliable (it also marks plain legal cards) and hasn't been checked against Scryfall yet.");
+        }
         if (cmdCI && info.ci.some((c) => !cmdCI.includes(c)))
           add("error", d, info.name, `Colour identity ${info.ci.join("") || "C"} is outside the commander's (${[...new Set(cmdCI)].join("") || "C"})`);
         if (e.qty > 1 && !isBasic(info.name) && !info.anyNumber)
@@ -1006,7 +1013,7 @@
     artUrl, artByName, pickSid,
     DEFAULT_CONFIG, norm, isBasic, parseCSV, parseCollection, csvEscape,
     buildIndex, resolve, keyOf, cardInfo, buildOwnership,
-    sleeveList, foilSuggestions, pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
+    setLegal, sleeveList, foilSuggestions, pencilStatus, isReflected, syncDeckLists, swapShown, evalWishlist,
     activePencils, commandersOf, deckMap, deckTotal, applySwaps, deckText,
     eligibleRows, printings, printKeyOf, collectionEntries, filterCollection, sortCollection, binderSummary, TYPE_CHIPS, deckStats, classifyRoles, classifyRolesEx, ROLE_KEYS, allocateDeck, pickConflicts, rebuildCSV, rebuildText, buildClaims, sumQty, runChecks, buildTrades, RARS, rowAUD, setLive, basicNames, basicHolders, tidyPlan, printKey, tickEntries, snapPrint, matchTitle, matchAnyTitle, fuzzyEntry, lev, indexBySetCn, fixDigits, cnNum, parseCollector, matchScan, whereIs, upgradeCandidates, deckValue, GAP_ROLES, tradesCSV, tradesText,
   };
