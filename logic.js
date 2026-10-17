@@ -178,9 +178,17 @@
     }
   }
   // Does the ManaBox list already show this swap (OUT gone and IN present)? Works for any status.
+  // A basic land going OUT can't be proven gone (other copies stay in the deck), so only the IN card is checked.
+  // An IN card that a later made/done swap in the same deck took back out (A -> B, then B -> C) counts as seen.
+  function swapOutGone(deck, p, idx, m) { return !p.out || isBasic(p.out) || !m.has(keyOf(idx, p.out)); }
+  function swapInThere(deck, p, idx, m) {
+    if (!p.in || m.has(keyOf(idx, p.in))) return true;
+    const k = keyOf(idx, p.in);
+    return (deck.pencilled || []).some((q) => q !== p && q.out && ["made", "done"].includes(norm(q.status || "")) && keyOf(idx, q.out) === k);
+  }
   function swapShown(deck, p, idx, m) {
     m = m || deckMap(deck, idx);
-    return (!p.out || !m.has(keyOf(idx, p.out))) && (!p.in || m.has(keyOf(idx, p.in))) && !!(p.out || p.in);
+    return swapOutGone(deck, p, idx, m) && swapInThere(deck, p, idx, m) && !!(p.out || p.in);
   }
   const deckTotal = (m) => [...m.values()].reduce((s, e) => s + e.qty, 0);
 
@@ -188,9 +196,7 @@
   // "made" = physically swapped but ManaBox not updated yet. If the CSV deck list already shows it, it is "reflected".
   function isReflected(deck, p, idx, m) {
     m = m || deckMap(deck, idx);
-    const outGone = !p.out || !m.has(keyOf(idx, p.out));
-    const inThere = !p.in || m.has(keyOf(idx, p.in));
-    return pencilStatus(p) === "made" && outGone && inThere;
+    return pencilStatus(p) === "made" && swapOutGone(deck, p, idx, m) && swapInThere(deck, p, idx, m);
   }
   // opts.only: array of statuses to apply (default: every active swap)
   function applySwaps(deck, idx, opts) {
