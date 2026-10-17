@@ -10,7 +10,7 @@
     idx: null, rows: [], csvName: "", own: new Map(), decks: [], claims: { hard: new Map(), soft: new Map() },
     wtoken: "", who: "", statsOpen: false, statsMode: "swaps", statsRole: "", dview: "stacks", zoom: null, rul: {}, col: { view: "binders", layout: "grid", q: "", colors: new Set(), cmode: "any", ci: new Set(), ciDeck: "", mv: new Set(), types: new Set(), rarity: new Set(), set: "", binder: "", foil: "", sort: "name", dir: 1, limit: 120, open: false }, saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, reserveBy: { common: 0, uncommon: 0, rare: 0, mythic: 0 }, minPrice: 0, flagPrice: 0, showCommitted: false, picked: null, out: null, error: "", busy: "", dbCount: 0,
   };
-  try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; S.dview = localStorage.getItem("mtg_dview") || "stacks"; S.reviewer = localStorage.getItem("mtg_reviewer") === "1"; } catch (e) { /* storage blocked */ }
+  try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; S.dview = localStorage.getItem("mtg_dview") || "stacks"; S.reviewer = localStorage.getItem("mtg_reviewer") === "1"; S.guest = localStorage.getItem("mtg_guest") === "1" && !S.wtoken; } catch (e) { /* storage blocked */ }
 
   /* ---------- phone back button: closes pop-ups, then leaves the deck ---------- */
   S.nav = []; S.ignorePop = 0;
@@ -160,11 +160,11 @@
         d._sha = f.sha; d._orig = JSON.parse(JSON.stringify(d.pencilled || []));
         return d;
       }));
-      try { S.wl = JSON.parse(await gh("wishlist.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.wl = []; }
-      try { S.foilprio = JSON.parse(await gh("foilprio.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.foilprio = null; }
-      try { S.landplan = JSON.parse(await gh("landplan.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.landplan = null; }
+      if (!S.guest) try { S.wl = JSON.parse(await gh("wishlist.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.wl = []; }
+      if (!S.guest) try { S.foilprio = JSON.parse(await gh("foilprio.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.foilprio = null; }
+      if (!S.guest) try { S.landplan = JSON.parse(await gh("landplan.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.landplan = null; }
       try { S.guides = new Set((await ghList("guides")).filter((f) => f.type === "file" && /\.html$/i.test(f.name)).map((f) => f.name.replace(/\.html$/i, ""))); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.guides = new Set(); }
-      const csvs = (await ghList("collection")).filter((f) => f.type === "file" && /\.csv$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name));
+      const csvs = S.guest ? [] : (await ghList("collection")).filter((f) => f.type === "file" && /\.csv$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name));
       let text = "", name = "";
       if (csvs.length) { const fixed = csvs.find((f) => f.name === "ManaBox_Collection.csv"); name = (fixed || csvs[csvs.length - 1]).name; text = await gh("collection/" + name, true); }
       await dbP;
@@ -1770,6 +1770,38 @@
     return h + addForm;
   }
 
+  /* ---------- Guest view: decks + strategy guides only ---------- */
+  function vGuest() {
+    const d = S.deck && deckBySlug(S.deck);
+    if (!d) {
+      S.deck = null;
+      if (!S.decks.length) return emptyMsg(S.busy ? "Loading…" : "No decks to show.");
+      return `<h2>Decks</h2><div class="tiles">` + S.decks.map((x) => {
+        const cm = M.commandersOf(x), tot = M.deckTotal(M.deckMap(x, S.idx));
+        return `<div class="tile" data-act="open" data-slug="${esc(x.slug)}">${cm.length ? artImg(M.keyOf(S.idx, cm[0]), cm[0], x, "art_crop", "tileimg") : ""}<div class="tilein"><div class="row"><b>${esc(x.name || x.slug)}</b></div><div class="muted">${esc(cm.join(" + "))} · ${tot} cards</div></div></div>`;
+      }).join("") + `</div>`;
+    }
+    const m = M.deckMap(d, S.idx), cmds = M.commandersOf(d), ck = cmds.length ? M.keyOf(S.idx, cmds[0]) : "";
+    let h = `<button class="back" data-act="back">← All decks</button><div class="hero">${ck ? artImg(ck, cmds[0], d, "art_crop", "heroimg") : ""}<div class="heroin"><div class="herot">${esc(d.name || d.slug)}</div><div class="herom">${esc(cmds.join(" + "))}</div><div class="herom">${M.deckTotal(m)} cards</div></div></div>
+      <div>${S.guides && S.guides.has(d.slug) ? `<button class="btn" data-act="guide" data-slug="${esc(d.slug)}">Strategy guide</button>` : `<span class="muted">No strategy guide for this deck yet.</span>`}</div>`;
+    const groups = {};
+    for (const [k, e] of m) { const info = M.cardInfo(S.idx, k); const isCmd = cmds.some((c) => M.keyOf(S.idx, c) === k); const g = isCmd ? "Commander" : groupOf(info); (groups[g] = groups[g] || []).push({ k, e }); }
+    const view = S.dview || "stacks";
+    h += `<div class="chips vt">${["stacks", "grid"].map((v) => `<button data-act="dview" data-v="${v}" class="${(view === "grid" ? "grid" : "stacks") === v ? "on" : ""}">${{ stacks: "Stacks", grid: "Grid" }[v]}</button>`).join("")}</div>`;
+    const tile = (x, last) => `<div class="ac${view === "grid" || last ? " full" : ""}" data-act="zoom" data-key="${esc(x.k)}" data-slug="${esc(d.slug)}">${artImg(x.k, x.e.name, d, "normal", "acimg")}${x.e.qty > 1 ? `<span class="qty">${x.e.qty}×</span>` : ""}</div>`;
+    h += `<div class="${view === "grid" ? "gridv" : "stacks"}">`;
+    for (const g of TYPE_ORDER) {
+      if (!groups[g]) continue;
+      const list = groups[g].sort((a, b) => a.e.name.localeCompare(b.e.name));
+      h += `<div class="stack"><div class="sh">${g}<span>${list.reduce((n, x) => n + x.e.qty, 0)}</span></div>${list.map((x, n) => tile(x, n === list.length - 1)).join("")}</div>`;
+    }
+    return h + `</div>`;
+  }
+  function guestZoom() {
+    if (!S.zoom) return "";
+    const k = S.zoom.key, info = M.cardInfo(S.idx, k), name = info ? info.name : k.replace(/^\?/, ""), d = deckBySlug(S.zoom.slug);
+    return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${artImg(k, name, d, "normal", "zimg")}${oracleBox(info, k)}<button class="btn" data-act="closezoom">Close</button></div></div>`;
+  }
   /* ---------- Share: QR codes ---------- */
   function qrSvg(text) {
     try { const q = qrcode(0, "M"); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 6, margin: 3, scalable: true }); } catch (e) { return `<div class="muted">Couldn't make a QR code: ${esc(e.message)}</div>`; }
@@ -1780,7 +1812,7 @@
     let h = `<h2>Share the apps</h2><div class="card"><div class="muted">Point a phone camera at a code to open the app.</div>${one("Deck tracker", appUrl)}${one("MTG glossary", glossUrl)}`;
     if (S.token) {
       h += `<div style="margin-top:10px"><button class="btn alt" data-act="guestqr">${S.guestQr ? "Hide guest code" : "Make guest code (includes your read-only token)"}</button></div>`;
-      if (S.guestQr) h += `<div class="card lvl-warn"><b>Anyone who scans this can read your private deck data.</b> It opens the tracker and fills in your read-only token for them; it can't change anything. Only show it to people you trust, and don't post it. If it gets out, delete the token in GitHub and make a new one.</div>${one("Guest sign-in for the tracker", appUrl + "#t=" + encodeURIComponent(S.token))}`;
+      if (S.guestQr) h += `<div class="card lvl-warn"><b>Anyone who scans this can read your private deck data.</b> It opens the tracker in a guest view that shows only the decks and their strategy guides (no tabs, no editing, no collection), using your read-only token. The hiding is in the app only: the token itself can still read the whole data repo. Only show it to people you trust, and don't post it. If it gets out, delete the token in GitHub and make a new one.</div>${one("Guest sign-in for the tracker", appUrl + "#t=" + encodeURIComponent(S.token))}`;
     } else h += `<div class="muted" style="margin-top:8px">Save your read-only token above and a guest sign-in code appears here.</div>`;
     return h + `</div>`;
   }
@@ -1820,6 +1852,11 @@
     let h = "";
     if (S.error) h += `<div class="card lvl-error">${esc(S.error)}</div>`;
     if (S.busy || S.saving) h += `<div class="card muted">${esc(S.busy || S.saving)}</div>`;
+    if (S.guest) {
+      document.body.classList.add("guest");
+      $("#view").innerHTML = h + vGuest() + guestZoom();
+      return;
+    }
     h += outBox();
     h += { decks: vDecks, collection: vCollection, check: vCheck, trades: vTrades, wishlist: vWishlist, data: vData }[S.tab]();
     h += zoomModal() + chooserModal();
@@ -1886,10 +1923,11 @@
     if (Date.now() < S.noClickUntil) { ev.preventDefault(); ev.stopPropagation(); return; }
     if (ev.target.closest && ev.target.closest("#refresh")) { forceRefresh(); return; }
     const tabBtn = ev.target.closest("#tabs button");
-    if (tabBtn) { S.tab = tabBtn.dataset.tab; S.tk = null; S.sc = null; S.land = false; S.fp = false; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
+    if (tabBtn && !S.guest) { S.tab = tabBtn.dataset.tab; S.tk = null; S.sc = null; S.land = false; S.fp = false; S.out = null; S.zoom = null; S.ch = null; S.deck = null; resetNav(); render(); window.scrollTo(0, 0); return; }
     const el = ev.target.closest("[data-act]");
     if (!el) return;
     const a = el.dataset.act;
+    if (S.guest && !["open", "back", "guide", "guideclose", "zoom", "closezoom", "noop", "dview"].includes(a)) return;
     if (a === "toggle") { const o = el.querySelector("[data-o]"); if (o) o.hidden = !o.hidden; }
     else if (a === "open") { S.del = null; S.tk = null; S.deck = el.dataset.slug; pushNav("deck"); render(); window.scrollTo(0, 0); }
     else if (a === "guestqr") { S.guestQr = !S.guestQr; render(); }
@@ -2178,12 +2216,14 @@
   });
 
   status(); render();
+  window.addEventListener("hashchange", () => { if (/[#&]owner\b/.test(location.hash || "")) { try { localStorage.removeItem("mtg_guest"); } catch (e) { /* ignore */ } history.replaceState(history.state, "", location.pathname + location.search); location.reload(); } });
   try {
+    if (/[#&]owner\b/.test(location.hash || "")) { S.guest = false; history.replaceState(history.state, "", location.pathname + location.search); try { localStorage.removeItem("mtg_guest"); } catch (e) { /* ignore */ } }
     const m = /[#&]t=([^&]+)/.exec(location.hash || "");
     if (m) {
       const t = decodeURIComponent(m[1]).trim();
       history.replaceState(history.state, "", location.pathname + location.search); // remove the token from the address bar
-      if (t && !S.wtoken) { S.token = t; try { localStorage.setItem("mtg_token", t); } catch (e) { /* ignore */ } }
+      if (t && !S.wtoken) { S.token = t; S.guest = true; try { localStorage.setItem("mtg_token", t); localStorage.setItem("mtg_guest", "1"); } catch (e) { /* ignore */ } }
     }
   } catch (e) { /* ignore */ }
   if (S.token) loadAll();
