@@ -1805,6 +1805,7 @@
   }
   function guestTrades() {
     const cards = tlCards();
+    if (!cards.length) return `<h2>For trade</h2><div class="card muted">Nothing is listed for trade right now.</div>`;
     const q = norm(S.gtq || "");
     const list = cards.filter((c) => !q || norm(c.name).includes(q));
     const total = cards.reduce((a, c) => a + (c.price != null ? c.price * c.qty : 0), 0);
@@ -1818,8 +1819,8 @@
   /* ---------- Guest view: decks + strategy guides only ---------- */
   function vGuest() {
     const d = S.deck && deckBySlug(S.deck);
-    const sw = !d && tlCards().length ? `<div class="chips vt">${["decks", "trades"].map((v) => `<button data-act="gtab" data-v="${v}" class="${(S.gtab || "decks") === v ? "on" : ""}">${{ decks: "Decks", trades: "For trade" }[v]}</button>`).join("")}</div>` : "";
-    if (!d && S.gtab === "trades" && tlCards().length) return sw + guestTrades();
+    const sw = !d ? `<div class="chips vt">${["decks", "trades"].map((v) => `<button data-act="gtab" data-v="${v}" class="${(S.gtab || "decks") === v ? "on" : ""}">${{ decks: "Decks", trades: "For trade" }[v]}</button>`).join("")}</div>` : "";
+    if (!d && S.gtab === "trades") return sw + guestTrades();
     if (!d) {
       S.deck = null;
       if (!S.decks.length) return emptyMsg(S.busy ? "Loading…" : "No decks to show.");
