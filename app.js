@@ -62,6 +62,35 @@
     document.body.appendChild(box);
     setTimeout(done, 3500);
   }
+  /* ---------- Strategy guides ---------- */
+  let guideEl = null;
+  function removeGuide() { if (guideEl) { guideEl.remove(); guideEl = null; } document.body.style.overflow = ""; }
+  async function openGuide(slug) {
+    const d = deckBySlug(slug); if (!d) return;
+    removeGuide();
+    const box = guideEl = document.createElement("div"); box.id = "guidebox";
+    box.innerHTML = `<div class="guidebar"><button class="btn" data-act="guideclose">← Back to deck</button><span class="guidet">${esc(d.name || slug)} — strategy guide</span></div><div class="guidebody"><p class="muted" style="padding:16px">Loading guide…</p></div>`;
+    document.body.appendChild(box); document.body.style.overflow = "hidden"; pushNav("guide");
+    const body = box.querySelector(".guidebody"), key = "mtg-guide-" + slug;
+    let html = "", note = "";
+    try {
+      const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/guides/${encodeURIComponent(slug)}.html?ref=${encodeURIComponent(S.cfg.branch)}&_=${Date.now()}`;
+      const r = await fetch(url, { headers: { Authorization: "Bearer " + S.token, Accept: "application/vnd.github.raw+json" }, cache: "no-store" });
+      if (!r.ok) throw new Error("GitHub " + r.status);
+      html = await r.text();
+      if (!/<html|<!doctype/i.test(html.slice(0, 400))) throw new Error("unexpected reply");
+      try { localStorage.setItem(key, html); } catch (e) { /* ignore */ }
+    } catch (e) {
+      try { html = localStorage.getItem(key) || ""; } catch (e2) { html = ""; }
+      note = html ? "Showing the copy saved on this phone (couldn't reach GitHub)." : "Couldn't load the guide: " + e.message;
+    }
+    if (guideEl !== box) return;
+    if (!html) { body.innerHTML = `<p class="muted" style="padding:16px">${esc(note)}</p>`; return; }
+    const fr = document.createElement("iframe");
+    fr.setAttribute("sandbox", "allow-scripts allow-popups"); fr.setAttribute("allow", "clipboard-write"); fr.title = "Strategy guide";
+    fr.srcdoc = html; body.innerHTML = ""; body.appendChild(fr);
+    if (note) { const n = document.createElement("div"); n.className = "guidenote"; n.textContent = note; box.insertBefore(n, body); }
+  }
   window.addEventListener("popstate", () => {
     if (S.ignorePop > 0) { S.ignorePop--; return; }
     const st = history.state || {};
@@ -74,6 +103,7 @@
     const t = S.nav.pop();
     if (t === "modal") { S.zoom = null; S.ch = null; }
     else if (t === "deck") S.deck = null;
+    else if (t === "guide") { removeGuide(); }
     else if (t === "tick") { S.tk = null; }
     else if (t === "scanlist") { S.sc = null; }
     else if (t === "land") { S.land = false; }
@@ -130,6 +160,7 @@
       try { S.wl = JSON.parse(await gh("wishlist.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.wl = []; }
       try { S.foilprio = JSON.parse(await gh("foilprio.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.foilprio = null; }
       try { S.landplan = JSON.parse(await gh("landplan.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.landplan = null; }
+      try { S.guides = new Set((await ghList("guides")).filter((f) => f.type === "file" && /\.html$/i.test(f.name)).map((f) => f.name.replace(/\.html$/i, ""))); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.guides = new Set(); }
       const csvs = (await ghList("collection")).filter((f) => f.type === "file" && /\.csv$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name));
       let text = "", name = "";
       if (csvs.length) { const fixed = csvs.find((f) => f.name === "ManaBox_Collection.csv"); name = (fixed || csvs[csvs.length - 1]).name; text = await gh("collection/" + name, true); }
@@ -863,7 +894,7 @@
         url = j.has_more ? j.next_page : "";
       }
       if (Object.keys(out).length) { lookCache.set(key, out); lookSave(); return out; }
-    } catch (e) { console.log("LOOKFAIL " + e.message); }
+    } catch (e) { /* lookup failed: fall through */ }
     return null;
   }
   // Which of the printings seen for this entry look different from the one ManaBox has? -> { differs:[], same:[], unknown:[] }
@@ -1184,7 +1215,7 @@
       <div class="hero">${ck ? artImg(ck, cmds[0], d, "art_crop", "heroimg") : ""}<div class="heroin"><div class="herot">${esc(d.name || d.slug)}</div>
       <div class="herom">${esc(cmds.join(" + "))}</div>
       <div class="herom">${esc(d.status || "planned")} · ${M.deckTotal(m)} cards${S.rows.length && M.deckValue(S.rows, d) ? ` · worth about $${M.deckValue(S.rows, d).toFixed(0)} AUD` : ""}${nMade ? ` · ${nMade} made by hand` : ""}${nPen ? ` · ${nPen} pencilled` : ""}${d.updated ? " · updated " + esc(d.updated) : ""}</div></div></div>
-      <div><button class="btn" data-act="stats">${S.statsOpen ? "Hide stats" : "Deck stats"}</button><button class="btn" data-act="upg">${S.upgOpen ? "Hide upgrades" : "Upgrade finder"}</button><button class="btn" data-act="tkopen" data-slug="${esc(d.slug)}">Check deck</button><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
+      <div>${S.guides && S.guides.has(d.slug) ? `<button class="btn" data-act="guide" data-slug="${esc(d.slug)}">Strategy guide</button>` : ""}<button class="btn" data-act="stats">${S.statsOpen ? "Hide stats" : "Deck stats"}</button><button class="btn" data-act="upg">${S.upgOpen ? "Hide upgrades" : "Upgrade finder"}</button><button class="btn" data-act="tkopen" data-slug="${esc(d.slug)}">Check deck</button><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
       ${pens.some((p) => M.pencilStatus(p) === "made") ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="physical">Export list as it is physically</button>` : ""}
       ${pens.some((p) => ["approved", "made"].includes(M.pencilStatus(p))) ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with confirmed changes</button>` : ""}</div>
       ${pens.some((p) => M.pencilStatus(p) === "pencilled") ? `<div class="muted">Pencilled swaps aren't in any export until you approve them.</div>` : ""}`;
@@ -1843,6 +1874,8 @@
     const a = el.dataset.act;
     if (a === "toggle") { const o = el.querySelector("[data-o]"); if (o) o.hidden = !o.hidden; }
     else if (a === "open") { S.del = null; S.tk = null; S.deck = el.dataset.slug; pushNav("deck"); render(); window.scrollTo(0, 0); }
+    else if (a === "guide") { openGuide(el.dataset.slug); }
+    else if (a === "guideclose") { removeGuide(); popNav("guide"); }
     else if (a === "fpopen") { S.fp = true; S.deck = null; pushNav("foils"); render(); window.scrollTo(0, 0); }
     else if (a === "fpback") { S.fp = false; popNav("foils"); render(); }
     else if (a === "fpmove") { const o = fpOrder(), i = +el.dataset.i, j = i + +el.dataset.d; if (j >= 0 && j < o.length) { [o[i], o[j]] = [o[j], o[i]]; S.fpOrder = o; S.fpDirty = true; S.fpMsg = ""; render(); } }
