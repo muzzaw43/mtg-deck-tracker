@@ -172,3 +172,5 @@ tr.flag td{background:rgba(230,180,80,.16)}
 .dangerzone .inp{width:100%;box-sizing:border-box;margin:8px 0;padding:10px;border-radius:8px;border:1px solid #666;background:#111;color:inherit;font-size:16px}
 .btn.danger{background:#a93226;color:#fff;border-color:#a93226}
 .btn.danger:disabled{opacity:.4}
+
+.sugg{display:flex;flex-direction:column;border-radius:8px;overflow:hidden;margin-top:2px}.sugg:empty{display:none}.sugg .sug{text-align:left;background:var(--panel);color:var(--text);border:1px solid var(--line);border-top:0;padding:10px;font:inherit;font-size:14px}.sugg .sug:first-child{border-top:1px solid var(--line);border-radius:8px 8px 0 0}.sugg .sug:last-child{border-radius:0 0 8px 8px}.sugg .sug:active{background:var(--accent)}

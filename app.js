@@ -1733,7 +1733,7 @@
     const delBox = (name) => !S.wtoken ? "" : S.wlDel && norm(S.wlDel) === norm(name)
       ? `<div class="row dangerzone armed"><span class="muted">Remove <b>${esc(name)}</b> from the wishlist?</span><button class="btn danger" data-act="wldelyes" data-name="${esc(name)}">Yes, remove</button><button class="btn alt" data-act="wldelno">Keep</button></div>`
       : `<div><button class="btn alt" data-act="wldel" data-name="${esc(name)}">Remove from wishlist</button></div>`;
-    const addForm = S.wtoken ? `<h3>Add a card</h3><div class="card"><input type="text" id="wlname" placeholder="Card name" autocomplete="off"><div class="row"><select id="wldecknew"><option value="">no particular deck</option>${S.decks.map((x) => `<option value="${esc(x.slug)}">${esc(x.name || x.slug)}</option>`).join("")}</select></div><input type="text" id="wlnote" placeholder="Note (optional)" autocomplete="off" style="margin-top:6px"><button class="btn" data-act="wlnew" style="margin-top:6px">Add to wishlist</button>${S.wlMsg ? `<div class="muted" style="margin-top:6px">${esc(S.wlMsg)}</div>` : ""}</div>` : `<div class="muted" style="margin-top:6px">To add or remove cards here, add a write token in the Data tab.</div>`;
+    const addForm = S.wtoken ? `<h3>Add a card</h3><div class="card"><input type="text" id="wlname" placeholder="Start typing a card name…" autocomplete="off" autocapitalize="off" spellcheck="false"><div id="wlsug" class="sugg"></div><div class="row"><select id="wldecknew"><option value="">no particular deck</option>${S.decks.map((x) => `<option value="${esc(x.slug)}">${esc(x.name || x.slug)}</option>`).join("")}</select></div><input type="text" id="wlnote" placeholder="Note (optional)" autocomplete="off" style="margin-top:6px"><button class="btn" data-act="wlnew" style="margin-top:6px">Add to wishlist</button>${S.wlMsg ? `<div class="muted" style="margin-top:6px">${esc(S.wlMsg)}</div>` : ""}</div>` : `<div class="muted" style="margin-top:6px">To add or remove cards here, add a write token in the Data tab.</div>`;
     if (!S.wl.length && !S.decks.some((d) => (d.wishlist || []).length)) return `<h2>Wishlist</h2>` + emptyMsg("Nothing on the wishlist.") + addForm;
     const sec = (title, list, open) => list.length ? `<h3>${title} (${list.length})</h3>` + list.map((w) => cardRow(w.key, w.name, 1, "", open, wishPill(w) + (w.kind && w.kind !== "want" ? ` <span class="pill">${esc(w.kind)}</span>` : ""), null)
       + `<div class="muted">${esc((w.decks || []).map((sl) => (deckBySlug(sl) || { name: sl }).name || sl).join(", "))}${w.note ? " — " + esc(w.note) : ""}</div>` + delBox(w.name)).join("") : "";
@@ -1980,10 +1980,11 @@
       if (!nm0.trim()) { S.wlMsg = "Type a card name first."; render(); return; }
       const canon = S.idx ? M.resolve(S.idx, nm0.trim()) : null, name = canon || nm0.trim();
       S.saving = "Saving…"; S.wlMsg = ""; render();
-      try { await addToWishlist(name, slug, note.trim() || ("Added in the app" + (S.who ? " by " + S.who : ""))); S.wlMsg = canon ? "" : `Added "${name}", but it isn't in the card database, so check the spelling.`; S.saving = ""; recompute(); }
-      catch (e) { S.error = e.message; S.saving = ""; }
+      try { await addToWishlist(name, slug, note.trim() || ("Added in the app" + (S.who ? " by " + S.who : ""))); S.wlMsg = canon ? `Added ${name} ✓` : `Added "${name}", but it isn't in the card database, so check the spelling.`; S.saving = ""; recompute(); }
+      catch (e) { S.error = e.message; S.wlMsg = "Couldn't save: " + e.message; S.saving = ""; }
       render();
     }
+    else if (a === "wlsugpick") { const i = $("#wlname"); if (i) { i.value = el.dataset.name; i.focus(); } const b = $("#wlsug"); if (b) b.innerHTML = ""; }
     else if (a === "wldel") { S.wlDel = el.dataset.name; render(); }
     else if (a === "wldelno") { S.wlDel = ""; render(); }
     else if (a === "wldelyes") {
@@ -2065,6 +2066,17 @@
       const q = M.norm ? M.norm(ev.target.value) : ev.target.value.toLowerCase(), seen = new Set(), out = [];
       for (const e of S.tk.entries) { if (seen.has(e.key) || !q || !e.name.toLowerCase().includes(q.trim())) continue; seen.add(e.key); out.push(e); if (out.length >= 8) break; }
       $("#scanqres").innerHTML = out.map((e) => `<button class="btn" data-act="scanchoose" data-id="${esc(e.id)}">${esc(plain(e.name))}</button>`).join("") || `<span class="muted">${q ? "Not in this deck's list" : ""}</span>`;
+    }
+    if (ev.target.id === "wlname") {
+      const box = $("#wlsug"), q = M.norm(ev.target.value);
+      if (!box) return;
+      if (q.length < 2 || !S.idx) { box.innerHTML = ""; return; }
+      if (!S._names) S._names = Object.keys(S.idx.db).filter((k) => !/^A-/.test(k)).map((k) => [k, k.toLowerCase()]);
+      const st = [], inc = [];
+      for (const [k, l] of S._names) { if (l.startsWith(q)) st.push(k); else if (l.includes(q)) inc.push(k); if (st.length >= 8) break; }
+      const out = st.concat(inc).slice(0, 8);
+      if (out.length) ev.target.scrollIntoView({ block: "center" });
+      box.innerHTML = out.map((k) => `<button type="button" class="sug" data-act="wlsugpick" data-name="${esc(k)}">${esc(k)}</button>`).join("");
     }
     if (ev.target.id === "scname" && S.sc) { S.sc.name = ev.target.value; scSave(); }
     if (ev.target.id === "sccmd" && S.sc) { S.sc.cmdr = ev.target.value; scSave(); }
