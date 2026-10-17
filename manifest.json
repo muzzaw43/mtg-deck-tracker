@@ -2,6 +2,7 @@
   "name": "MTG Deck Tracker",
   "short_name": "MTG Decks",
   "description": "Commander decks, swaps and collection alongside ManaBox",
+  "id": "/mtg-deck-tracker/?app=2",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
