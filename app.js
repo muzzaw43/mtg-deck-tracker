@@ -69,7 +69,7 @@
     const d = deckBySlug(slug); if (!d) return;
     removeGuide();
     const box = guideEl = document.createElement("div"); box.id = "guidebox";
-    box.innerHTML = `<div class="guidebar"><button class="btn" data-act="guideclose">← Back to deck</button><span class="guidet">${esc(d.name || slug)} — strategy guide</span></div><div class="guidebody"><p class="muted" style="padding:16px">Loading guide…</p></div>`;
+    box.innerHTML = `<div class="guidebar"><button class="btn" data-act="guideclose">← Back to deck</button><span class="guidet">${esc(d.name || slug)} — strategy guide</span><button class="btn alt guidetop" data-act="guidetop" aria-label="Back to top">↑ Top</button></div><div class="guidebody"><p class="muted" style="padding:16px">Loading guide…</p></div>`;
     document.body.appendChild(box); document.body.style.overflow = "hidden"; pushNav("guide");
     const body = box.querySelector(".guidebody"), key = "mtg-guide-" + slug;
     let html = "", note = "";
@@ -89,7 +89,7 @@
     const fr = document.createElement("iframe");
     fr.setAttribute("sandbox", "allow-scripts allow-popups"); fr.setAttribute("allow", "clipboard-write"); fr.title = "Strategy guide";
     // in-page links (#plan etc.) would otherwise load the app inside the frame; scroll instead
-    const nav = "<script>document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a[href^=\"#\"]');if(!a)return;e.preventDefault();var id=decodeURIComponent(a.getAttribute('href').slice(1));var t=id&&document.getElementById(id);if(t){var h=document.querySelector('.topbar,header,nav'),o=h&&getComputedStyle(h).position!=='static'?h.offsetHeight:0;window.scrollTo({top:t.getBoundingClientRect().top+window.scrollY-o-8,behavior:'smooth'});}else if(!id)window.scrollTo({top:0,behavior:'smooth'});});<\/script>";
+    const nav = "<script>window.addEventListener('message',function(e){if(e.data==='mtg-top')window.scrollTo({top:0,behavior:'smooth'});});document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a[href^=\"#\"]');if(!a)return;e.preventDefault();var id=decodeURIComponent(a.getAttribute('href').slice(1));var t=id&&document.getElementById(id);if(t){var h=document.querySelector('.topbar,header,nav'),o=h&&getComputedStyle(h).position!=='static'?h.offsetHeight:0;window.scrollTo({top:t.getBoundingClientRect().top+window.scrollY-o-8,behavior:'smooth'});}else if(!id)window.scrollTo({top:0,behavior:'smooth'});});<\/script>";
     html = html.includes("</body>") ? html.replace("</body>", () => nav + "</body>") : html + nav;
     fr.srcdoc = html; body.innerHTML = ""; body.appendChild(fr);
     if (note) { const n = document.createElement("div"); n.className = "guidenote"; n.textContent = note; box.insertBefore(n, body); }
@@ -1981,6 +1981,7 @@
     else if (a === "guestqr") { S.guestQr = !S.guestQr; render(); }
     else if (a === "rvtoggle") { S.rvOpen = !S.rvOpen; render(); }
     else if (a === "guide") { openGuide(el.dataset.slug); }
+    else if (a === "guidetop") { const f = document.querySelector("#guidebox iframe"); if (f && f.contentWindow) f.contentWindow.postMessage("mtg-top", "*"); }
     else if (a === "guideclose") { removeGuide(); popNav("guide"); }
     else if (a === "fpopen") { S.fp = true; S.deck = null; pushNav("foils"); render(); window.scrollTo(0, 0); }
     else if (a === "fpback") { S.fp = false; popNav("foils"); render(); }
