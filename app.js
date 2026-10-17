@@ -10,7 +10,7 @@
     idx: null, rows: [], csvName: "", own: new Map(), decks: [], claims: { hard: new Map(), soft: new Map() },
     wtoken: "", who: "", statsOpen: false, statsMode: "swaps", statsRole: "", dview: "stacks", zoom: null, rul: {}, col: { view: "binders", layout: "grid", q: "", colors: new Set(), cmode: "any", ci: new Set(), ciDeck: "", mv: new Set(), types: new Set(), rarity: new Set(), set: "", binder: "", foil: "", sort: "name", dir: 1, limit: 120, open: false }, saving: "", log: [], wl: [], wlEval: [], checks: [], level: "all", reserve: 0, reserveBy: { common: 0, uncommon: 0, rare: 0, mythic: 0 }, minPrice: 0, flagPrice: 0, showCommitted: false, picked: null, out: null, error: "", busy: "", dbCount: 0,
   };
-  try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; S.dview = localStorage.getItem("mtg_dview") || "stacks"; S.reviewer = localStorage.getItem("mtg_reviewer") === "1"; S.guest = localStorage.getItem("mtg_guest") === "1" && !S.wtoken; } catch (e) { /* storage blocked */ }
+  try { S.token = localStorage.getItem("mtg_token") || ""; S.wtoken = localStorage.getItem("mtg_wtoken") || ""; S.who = localStorage.getItem("mtg_who") || ""; S.dview = localStorage.getItem("mtg_dview") || "stacks"; S.reviewer = localStorage.getItem("mtg_reviewer") === "1"; S.guest = localStorage.getItem("mtg_guest") === "1" && !S.wtoken; if (sessionStorage.getItem("mtg_gprev") === "1") S.guest = true; } catch (e) { /* storage blocked */ }
 
   /* ---------- phone back button: closes pop-ups, then leaves the deck ---------- */
   S.nav = []; S.ignorePop = 0;
@@ -2216,9 +2216,10 @@
   });
 
   status(); render();
-  window.addEventListener("hashchange", () => { if (/[#&]owner\b/.test(location.hash || "")) { try { localStorage.removeItem("mtg_guest"); } catch (e) { /* ignore */ } history.replaceState(history.state, "", location.pathname + location.search); location.reload(); } });
+  window.addEventListener("hashchange", () => { if (/[#&]guest\b/.test(location.hash || "")) { try { sessionStorage.setItem("mtg_gprev", "1"); } catch (e) { /* ignore */ } history.replaceState(history.state, "", location.pathname + location.search); location.reload(); } else if (/[#&]owner\b/.test(location.hash || "")) { try { localStorage.removeItem("mtg_guest"); sessionStorage.removeItem("mtg_gprev"); } catch (e) { /* ignore */ } history.replaceState(history.state, "", location.pathname + location.search); location.reload(); } });
   try {
-    if (/[#&]owner\b/.test(location.hash || "")) { S.guest = false; history.replaceState(history.state, "", location.pathname + location.search); try { localStorage.removeItem("mtg_guest"); } catch (e) { /* ignore */ } }
+    if (/[#&]guest\b/.test(location.hash || "")) { S.guest = true; try { sessionStorage.setItem("mtg_gprev", "1"); } catch (e) { /* ignore */ } history.replaceState(history.state, "", location.pathname + location.search); }
+    if (/[#&]owner\b/.test(location.hash || "")) { S.guest = false; try { sessionStorage.removeItem("mtg_gprev"); } catch (e) { /* ignore */ } history.replaceState(history.state, "", location.pathname + location.search); try { localStorage.removeItem("mtg_guest"); } catch (e) { /* ignore */ } }
     const m = /[#&]t=([^&]+)/.exec(location.hash || "");
     if (m) {
       const t = decodeURIComponent(m[1]).trim();
