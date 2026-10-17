@@ -36,46 +36,31 @@
   // Exit guard: history is [root][guard]; Back from the guard lands on root, where we ask before leaving.
   // Chrome skips history entries a page adds before the user has touched it, which made Back leave the app without asking.
   // So the guard entry is added on the first tap or key press instead of at load.
+  function armGuard() {
+    const arm = () => {
+      window.removeEventListener("pointerup", arm, true); window.removeEventListener("keydown", arm, true); window.removeEventListener("touchend", arm, true); window.removeEventListener("click", arm, true);
+      try { if (!(history.state || {}).guard && !S.nav.length) history.pushState({ guard: 1 }, ""); else if (!(history.state || {}).guard) S.needGuard = true; } catch (e) { /* ignore */ }
+    };
+    // Arm on release (pointerup / touchend / click), not pointerdown: Chrome only counts those as real user taps, and it skips
+    // history entries added without one, which made Back leave the app without asking on phones.
+    window.addEventListener("pointerup", arm, true); window.addEventListener("keydown", arm, true); window.addEventListener("touchend", arm, true); window.addEventListener("click", arm, true);
+  }
   try {
     const st = history.state || {};
-    if (!st.guard) {
-      if (!st.root) history.replaceState({ root: 1 }, "");
-      const arm = () => {
-        window.removeEventListener("pointerup", arm, true); window.removeEventListener("keydown", arm, true); window.removeEventListener("touchend", arm, true); window.removeEventListener("click", arm, true);
-        try { if (!(history.state || {}).guard && !S.nav.length) history.pushState({ guard: 1 }, ""); else if (!(history.state || {}).guard) S.needGuard = true; } catch (e) { /* ignore */ }
-      };
-      // Arm on release (pointerup / touchend / click), not pointerdown: Chrome only counts those as real user taps, and it skips
-      // history entries added without one, which made Back leave the app without asking on phones.
-      window.addEventListener("pointerup", arm, true); window.addEventListener("keydown", arm, true); window.addEventListener("touchend", arm, true); window.addEventListener("click", arm, true);
-    }
+    if (!st.guard) { if (!st.root) history.replaceState({ root: 1 }, ""); armGuard(); }
   } catch (e) { /* ignore */ }
   let exitBox = null;
-  // A web page can't close its own tab, so "Close" steps back out of the app's history. If there is a page before the app (e.g. the
-  // new-tab page) go(-2) lands on it. If the app is the first page in the tab there is nothing to go back to, so settle on the root
-  // entry (no guard) and tell the person the next Back leaves; that Back is the browser's own.
-  function leaveApp() {
-    S.leaving = true;
-    const st = history.state || {};
-    try {
-      if (st.guard) { if (history.length >= 3) { history.go(-2); return; } history.go(-1); }
-      else history.back(); // already on the root entry (second Back while the box was showing)
-    } catch (e) { /* ignore */ }
-    try { window.close(); } catch (e) { /* ignore */ }
-    setTimeout(() => {
-      if (document.visibilityState === "hidden") return;
-      // Nothing to go back to (the app is the first page in this tab) and the browser won't let a page close itself: leave to a blank page, so there is only the one confirmation.
-      try { location.replace("about:blank"); } catch (e) { /* ignore */ }
-    }, 500);
-  }
+  // A web page can't close its own tab, so the "confirmation" is the usual Android double-Back: the first Back (which lands on the root
+  // entry) shows "Press Back again to close"; a second Back then leaves natively, exactly like the glossary does. If nobody presses Back
+  // again, the box goes away and the guard entry is put back on the next tap.
   function exitAsk() {
-    exitBox = document.createElement("div"); exitBox.id = "exitbox";
-    exitBox.innerHTML = '<div class="exitcard"><b>Close the app?</b><div class="row"><button class="btn" data-x="stay">Stay</button><button class="btn alt" data-x="leave">Close</button></div></div>';
-    exitBox.addEventListener("click", (ev) => {
-      const x = ev.target.closest("[data-x]"); const b = exitBox; exitBox = null; if (b) b.remove();
-      if (x && x.dataset.x === "leave") leaveApp();
-    });
-    document.body.appendChild(exitBox);
-    setTimeout(() => { if (exitBox) { exitBox.remove(); exitBox = null; } }, 6000);
+    if (exitBox) exitBox.remove();
+    const box = exitBox = document.createElement("div"); box.id = "exitbox";
+    box.innerHTML = '<div class="exitcard"><b>Press Back again to close the app</b><div class="row"><button class="btn" data-x="stay">Stay</button></div></div>';
+    const done = () => { if (exitBox !== box) return; exitBox = null; box.remove(); armGuard(); };
+    box.addEventListener("click", (ev) => { if (ev.target.closest("[data-x]")) { try { if (!(history.state || {}).guard && !S.nav.length) history.pushState({ guard: 1 }, ""); } catch (e) { /* ignore */ } exitBox = null; box.remove(); } });
+    document.body.appendChild(box);
+    setTimeout(done, 3500);
   }
   window.addEventListener("popstate", () => {
     if (S.ignorePop > 0) { S.ignorePop--; return; }
@@ -83,9 +68,7 @@
     if (st.root && !S.nav.length) {
       if (S.leaving) return; // leaving on purpose: don't ask again or re-arm the guard
       // Some browsers (Firefox on Android) don't show confirm() from here, so ask with our own box. A second Back also leaves.
-      if (exitBox) { const b = exitBox; exitBox = null; b.remove(); leaveApp(); return; }
       exitAsk();
-      try { history.pushState({ guard: 1 }, ""); } catch (e) { /* ignore */ }
       return;
     }
     const t = S.nav.pop();
