@@ -63,12 +63,9 @@
     try { window.close(); } catch (e) { /* ignore */ }
     setTimeout(() => {
       if (document.visibilityState === "hidden") return;
-      const n = document.createElement("div"); n.id = "exitbox";
-      n.innerHTML = '<div class="exitcard"><b>Press Back once more to leave</b><div class="row"><button class="btn" data-x="stay">OK</button></div></div>';
-      n.addEventListener("click", () => n.remove());
-      document.body.appendChild(n);
-      setTimeout(() => n.remove(), 5000);
-    }, 350);
+      // Nothing to go back to (the app is the first page in this tab) and the browser won't let a page close itself: leave to a blank page, so there is only the one confirmation.
+      try { location.replace("about:blank"); } catch (e) { /* ignore */ }
+    }, 500);
   }
   function exitAsk() {
     exitBox = document.createElement("div"); exitBox.id = "exitbox";
