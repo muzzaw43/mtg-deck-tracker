@@ -76,6 +76,8 @@
     else if (t === "land") { S.land = false; }
     else if (t === "foils") { S.fp = false; }
     if (t === "modal" && scanEl) scanStop();
+    // The first tap landed on a deck/modal, so the exit guard was never added. Add it now we're back at the root.
+    if (!S.nav.length && S.needGuard) { S.needGuard = false; try { history.pushState({ guard: 1 }, ""); } catch (e) { /* ignore */ } }
     render();
   });
 
