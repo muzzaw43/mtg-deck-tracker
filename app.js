@@ -193,13 +193,13 @@
   async function editWishlist(mutate, msg) {
     if (!S.wtoken) throw new Error("Saving needs a write token — add it in Data.");
     const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/wishlist.json`, hd = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
-    const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: hd });
+    const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch) + "&_=" + Date.now(), { headers: hd, cache: "no-store" });
     let list = [], sha;
     if (cur.ok) {
       const j = await cur.json(); sha = j && j.sha;
       if (!sha || Array.isArray(j)) throw new Error("Couldn't read the wishlist: GitHub sent an unexpected reply (" + JSON.stringify(j).slice(0, 120) + ")");
       if (typeof j.content === "string" && j.content.length) list = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(j.content.replace(/\s/g, "")), (c) => c.charCodeAt(0))));
-      else { const rr = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: { ...hd, Accept: "application/vnd.github.raw+json" } }); if (!rr.ok) throw new Error("Couldn't read the wishlist (" + rr.status + ")."); list = JSON.parse(await rr.text()); }
+      else { const rr = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch) + "&_=" + Date.now(), { headers: { ...hd, Accept: "application/vnd.github.raw+json" }, cache: "no-store" }); if (!rr.ok) throw new Error("Couldn't read the wishlist (" + rr.status + ")."); list = JSON.parse(await rr.text()); }
     }
     else if (cur.status !== 404) throw new Error("Couldn't read the wishlist (" + cur.status + ").");
     list = mutate(list) || list;
@@ -225,7 +225,7 @@
     const del = (sha) => fetch(url, { method: "DELETE", headers: hd, body: JSON.stringify({ message: `Delete deck: ${d.name || d.slug}${S.who ? " [" + S.who + "]" : ""}`, sha, branch: S.cfg.branch }) });
     let r = await del(d._sha);
     if (r.status === 409 || r.status === 422) {
-      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: hd });
+      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch) + "&_=" + Date.now(), { headers: hd, cache: "no-store" });
       if (cur.status === 404) return; // already gone
       if (!cur.ok) throw new Error("Couldn't re-read the deck file (" + cur.status + ").");
       r = await del((await cur.json()).sha);
@@ -243,7 +243,7 @@
       body: JSON.stringify({ message, content: b64(JSON.stringify(body, null, 2) + "\n"), sha, branch: S.cfg.branch }) });
     let r = await put(d._sha);
     if (r.status === 409 || r.status === 422) {
-      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" } });
+      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch) + "&_=" + Date.now(), { headers: { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" }, cache: "no-store" });
       if (!cur.ok) throw new Error("Save conflict and could not re-read the file (" + cur.status + ").");
       const j = await cur.json();
       const theirs = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(j.content.replace(/\s/g, "")), (c) => c.charCodeAt(0))));
@@ -271,7 +271,7 @@
       const base = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/`;
       const H = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
       S.saving = "Uploading…"; render();
-      const lr = await fetch(base + "collection?ref=" + encodeURIComponent(S.cfg.branch), { headers: H });
+      const lr = await fetch(base + "collection?ref=" + encodeURIComponent(S.cfg.branch) + "&_=" + Date.now(), { headers: H, cache: "no-store" });
       if (lr.status === 401 || lr.status === 403 || lr.status === 404) throw new Error("GitHub refused (" + lr.status + ") — the write token needs Contents: read and write on " + S.cfg.dataRepo + ".");
       const files = lr.ok ? await lr.json() : [];
       const ex = files.find((f) => f.name === "ManaBox_Collection.csv");
@@ -1323,7 +1323,7 @@
     S.fpMsg = "Saving…"; render();
     const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/foilprio.json`, hd = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
     try {
-      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: hd }); let sha;
+      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch) + "&_=" + Date.now(), { headers: hd, cache: "no-store" }); let sha;
       if (cur.ok) sha = (await cur.json()).sha; else if (cur.status !== 404) throw new Error("Couldn't read the saved order (" + cur.status + ").");
       const data = { order: fpOrder(), donors: fpDonors().filter((n) => S.decks.some((d) => (d.name || d.slug) === n)), updated: new Date().toISOString().slice(0, 10), by: S.who || "" };
       const r = await fetch(url, { method: "PUT", headers: hd, body: JSON.stringify({ message: `Foil priority saved${S.who ? " [" + S.who + "]" : ""}`, content: b64(JSON.stringify(data, null, 1) + "\n"), sha, branch: S.cfg.branch }) });
@@ -1647,7 +1647,7 @@
     T.savemsg = "Saving…"; render();
     const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/landplan.json`, hd = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
     try {
-      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: hd });
+      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch) + "&_=" + Date.now(), { headers: hd, cache: "no-store" });
       let data = { plans: {} }, sha;
       if (cur.ok) { const j = await cur.json(); sha = j.sha; data = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(j.content.replace(/\s/g, "")), (c) => c.charCodeAt(0)))); }
       else if (cur.status !== 404) throw new Error("Couldn't read the saved plan (" + cur.status + ").");
