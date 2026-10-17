@@ -195,7 +195,12 @@
     const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/wishlist.json`, hd = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
     const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: hd });
     let list = [], sha;
-    if (cur.ok) { const j = await cur.json(); sha = j.sha; list = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(j.content.replace(/\s/g, "")), (c) => c.charCodeAt(0)))); }
+    if (cur.ok) {
+      const j = await cur.json(); sha = j && j.sha;
+      if (!sha || Array.isArray(j)) throw new Error("Couldn't read the wishlist: GitHub sent an unexpected reply (" + JSON.stringify(j).slice(0, 120) + ")");
+      if (typeof j.content === "string" && j.content.length) list = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(j.content.replace(/\s/g, "")), (c) => c.charCodeAt(0))));
+      else { const rr = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: { ...hd, Accept: "application/vnd.github.raw+json" } }); if (!rr.ok) throw new Error("Couldn't read the wishlist (" + rr.status + ")."); list = JSON.parse(await rr.text()); }
+    }
     else if (cur.status !== 404) throw new Error("Couldn't read the wishlist (" + cur.status + ").");
     list = mutate(list) || list;
     const r = await fetch(url, { method: "PUT", headers: hd, body: JSON.stringify({ message: `${msg}${S.who ? " [" + S.who + "]" : ""}`, content: b64(JSON.stringify(list, null, 1) + "\n"), sha, branch: S.cfg.branch }) });
@@ -1980,8 +1985,8 @@
       if (!nm0.trim()) { S.wlMsg = "Type a card name first."; render(); return; }
       const canon = S.idx ? M.resolve(S.idx, nm0.trim()) : null, name = canon || nm0.trim();
       S.saving = "Saving…"; S.wlMsg = ""; render();
-      try { await addToWishlist(name, slug, note.trim() || ("Added in the app" + (S.who ? " by " + S.who : ""))); S.wlMsg = canon ? `Added ${name} ✓` : `Added "${name}", but it isn't in the card database, so check the spelling.`; S.saving = ""; recompute(); }
-      catch (e) { S.error = e.message; S.wlMsg = "Couldn't save: " + e.message; S.saving = ""; }
+      try { await addToWishlist(name, slug, note.trim() || ("Added in the app" + (S.who ? " by " + S.who : ""))); S.wlMsg = canon ? `Added ${name} ✓` : `Added "${name}", but it isn't in the card database, so check the spelling.`; S.saving = ""; try { recompute(); } catch (e2) { S.wlMsg = `Saved ${name}, but showing the list failed (${e2.message}). Reload the app.`; console.error(e2); } }
+      catch (e) { S.error = e.message; S.wlMsg = "Couldn't save: " + e.message; S.saving = ""; console.error(e); }
       render();
     }
     else if (a === "wlsugpick") { const i = $("#wlname"); if (i) { i.value = el.dataset.name; i.focus(); } const b = $("#wlsug"); if (b) b.innerHTML = ""; }

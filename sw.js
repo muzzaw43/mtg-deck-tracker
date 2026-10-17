@@ -1,5 +1,5 @@
 /* Offline shell: app files only. GitHub API, card DB and card images are never cached here. */
-const V = "v5", FILES = ["./", "index.html", "style.css", "app.js", "scan.js", "logic.js", "site-config.js", "manifest.json", "icon-192.png"];
+const V = "v6", FILES = ["./", "index.html", "style.css", "app.js", "scan.js", "logic.js", "site-config.js", "manifest.json", "icon-192.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", (e) => {
