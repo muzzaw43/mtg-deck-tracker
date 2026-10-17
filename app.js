@@ -610,7 +610,7 @@
         const pk = (d.picks || {})[c.key], cur = pk ? M.printKeyOf(pk) : "";
         const opts = p.map((x) => `<option value="${esc(x.k)}"${x.k === cur ? " selected" : ""}>${esc(String(x.set).toUpperCase())} #${esc(x.cn)}${/foil/i.test(x.foil) && !/normal/i.test(x.foil) ? " ★foil" : ""} · ${x.avail}× · ${esc([...x.where].join(", "))}</option>`).join("");
         const used = al.lines.find((l) => l.key === c.key);
-        return `<div class="cardrow"><div class="t"><span class="n">${esc(c.name)}</span></div><select data-pick="${esc(c.key)}" data-slug="${esc(d.slug)}"><option value="">Auto${used && !pk ? " — " + esc(String(used.row.set).toUpperCase()) + " #" + esc(used.row.cn) : ""}</option>${opts}</select></div>`;
+        return `<div class="cardrow"><div class="t"><span class="n">${esc(c.name)}</span></div><select data-pick="${esc(c.key)}" data-slug="${esc(d.slug)}"><option value="">Auto${used && !pk ? " — " + esc(String(used.row.set).toUpperCase()) + " #" + esc(used.row.cn) + (/foil|etched/i.test(used.row.foil || "") && !/normal/i.test(used.row.foil || "") ? " ★foil" : "") : ""}</option>${opts}</select></div>`;
       }).join("");
     }
     h += `<div style="margin-top:8px"><button class="btn" data-act="rebuildcsv" data-slug="${esc(d.slug)}">Export ManaBox CSV</button><button class="btn alt" data-act="rebuildtext" data-slug="${esc(d.slug)}">Export text list</button></div>`;
