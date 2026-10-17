@@ -165,19 +165,28 @@
       if (!document.querySelector(".modal") && S.tab !== "data" && !document.activeElement.matches("input,textarea,select")) render();
     } catch (e) { /* stay on ManaBox prices */ }
   }
-  async function addToWishlist(name, slug, note) {
+  async function editWishlist(mutate, msg) {
     if (!S.wtoken) throw new Error("Saving needs a write token — add it in Data.");
     const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/wishlist.json`, hd = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
     const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch), { headers: hd });
     let list = [], sha;
     if (cur.ok) { const j = await cur.json(); sha = j.sha; list = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(j.content.replace(/\s/g, "")), (c) => c.charCodeAt(0)))); }
     else if (cur.status !== 404) throw new Error("Couldn't read the wishlist (" + cur.status + ").");
-    const hit = list.find((w) => norm(w.name) === norm(name));
-    if (hit) { hit.decks = hit.decks || []; if (slug && !hit.decks.includes(slug)) hit.decks.push(slug); }
-    else list.push({ name, decks: slug ? [slug] : [], kind: "want", note: note || "" });
-    const r = await fetch(url, { method: "PUT", headers: hd, body: JSON.stringify({ message: `Wishlist: ${name}${S.who ? " [" + S.who + "]" : ""}`, content: b64(JSON.stringify(list, null, 1) + "\n"), sha, branch: S.cfg.branch }) });
+    list = mutate(list) || list;
+    const r = await fetch(url, { method: "PUT", headers: hd, body: JSON.stringify({ message: `${msg}${S.who ? " [" + S.who + "]" : ""}`, content: b64(JSON.stringify(list, null, 1) + "\n"), sha, branch: S.cfg.branch }) });
     if (!r.ok) throw new Error("Wishlist save failed: GitHub " + r.status);
     S.wl = list;
+  }
+  async function addToWishlist(name, slug, note, kind) {
+    await editWishlist((list) => {
+      const hit = list.find((w) => norm(w.name) === norm(name));
+      if (hit) { hit.decks = hit.decks || []; if (slug && !hit.decks.includes(slug)) hit.decks.push(slug); }
+      else list.push({ name, decks: slug ? [slug] : [], kind: kind || "want", note: note || "" });
+      return list;
+    }, `Wishlist: added ${name}`);
+  }
+  async function removeFromWishlist(name) {
+    await editWishlist((list) => list.filter((w) => norm(w.name) !== norm(name)), `Wishlist: removed ${name}`);
   }
   async function deleteDeckFile(d) {
     if (!S.wtoken) throw new Error("Deleting needs a write token — add it in Data (Contents: read and write, only " + S.cfg.dataRepo + ").");
@@ -1696,9 +1705,13 @@
     return `<span class="pill ${c}">${esc(t + extra)}</span>`;
   }
   function vWishlist() {
-    if (!S.wl.length && !S.decks.some((d) => (d.wishlist || []).length)) return emptyMsg("No wishlist loaded.");
+    const delBox = (name) => !S.wtoken ? "" : S.wlDel && norm(S.wlDel) === norm(name)
+      ? `<div class="row dangerzone armed"><span class="muted">Remove <b>${esc(name)}</b> from the wishlist?</span><button class="btn danger" data-act="wldelyes" data-name="${esc(name)}">Yes, remove</button><button class="btn alt" data-act="wldelno">Keep</button></div>`
+      : `<div><button class="btn alt" data-act="wldel" data-name="${esc(name)}">Remove from wishlist</button></div>`;
+    const addForm = S.wtoken ? `<h3>Add a card</h3><div class="card"><input type="text" id="wlname" placeholder="Card name" autocomplete="off"><div class="row"><select id="wldecknew"><option value="">no particular deck</option>${S.decks.map((x) => `<option value="${esc(x.slug)}">${esc(x.name || x.slug)}</option>`).join("")}</select></div><input type="text" id="wlnote" placeholder="Note (optional)" autocomplete="off" style="margin-top:6px"><button class="btn" data-act="wlnew" style="margin-top:6px">Add to wishlist</button>${S.wlMsg ? `<div class="muted" style="margin-top:6px">${esc(S.wlMsg)}</div>` : ""}</div>` : `<div class="muted" style="margin-top:6px">To add or remove cards here, add a write token in the Data tab.</div>`;
+    if (!S.wl.length && !S.decks.some((d) => (d.wishlist || []).length)) return `<h2>Wishlist</h2>` + emptyMsg("Nothing on the wishlist.") + addForm;
     const sec = (title, list, open) => list.length ? `<h3>${title} (${list.length})</h3>` + list.map((w) => cardRow(w.key, w.name, 1, "", open, wishPill(w) + (w.kind && w.kind !== "want" ? ` <span class="pill">${esc(w.kind)}</span>` : ""), null)
-      + `<div class="muted">${esc((w.decks || []).map((sl) => (deckBySlug(sl) || { name: sl }).name || sl).join(", "))}${w.note ? " — " + esc(w.note) : ""}</div>`).join("") : "";
+      + `<div class="muted">${esc((w.decks || []).map((sl) => (deckBySlug(sl) || { name: sl }).name || sl).join(", "))}${w.note ? " — " + esc(w.note) : ""}</div>` + delBox(w.name)).join("") : "";
     const ev = S.wlEval;
     const find = ev.filter((w) => ["missing", "partial"].includes(w.status) && !w.madeIn);
     const scan = ev.filter((w) => w.status === "missing" && w.madeIn);
@@ -1707,10 +1720,10 @@
     const placed = ev.filter((w) => w.status === "placed");
     let h = `<h2>Wishlist</h2><div class="muted">Cards clear themselves once your collection has enough copies for every deck that wants them. ${S.csvName ? "Based on " + esc(S.csvName) + "." : "Load a collection CSV to clear cards."}</div>`;
     h += sec("Still to find", find) + sec("In a deck by hand, not in ManaBox", scan) + sec("Have it — swap pending", have) + sec("In collection, no pending use — still wanted?", unused);
-    if (placed.length) h += `<h3>Cleared: in the deck (${placed.length})</h3><div class="muted">${placed.map((w) => esc(w.name)).join(", ")}</div>`;
+    if (placed.length) h += `<h3>Cleared: in the deck (${placed.length})</h3>` + (S.wtoken ? placed.map((w) => `<div class="muted">${esc(w.name)}</div>` + delBox(w.name)).join("") : `<div class="muted">${placed.map((w) => esc(w.name)).join(", ")}</div>`);
     S._need = find.map((w) => w.info ? w.info.name : w.name).sort();
     if (S._need.length) h += `<div style="margin-top:10px"><button class="btn" data-act="wishtext">Export "still to find" as text</button></div>`;
-    return h;
+    return h + addForm;
   }
 
   function vData() {
@@ -1934,6 +1947,23 @@
       const sel = $("#wldeck"), slug = sel ? sel.value : "", nm = el.dataset.name;
       S.saving = "Saving…"; render();
       try { await addToWishlist(nm, slug, "Added in the app" + (S.who ? " by " + S.who : "")); S.saving = ""; recompute(); }
+      catch (e) { S.error = e.message; S.saving = ""; }
+      render();
+    }
+    else if (a === "wlnew") {
+      const nm0 = ($("#wlname") || {}).value || "", slug = ($("#wldecknew") || {}).value || "", note = ($("#wlnote") || {}).value || "";
+      if (!nm0.trim()) { S.wlMsg = "Type a card name first."; render(); return; }
+      const canon = S.idx ? M.resolve(S.idx, nm0.trim()) : null, name = canon || nm0.trim();
+      S.saving = "Saving…"; S.wlMsg = ""; render();
+      try { await addToWishlist(name, slug, note.trim() || ("Added in the app" + (S.who ? " by " + S.who : ""))); S.wlMsg = canon ? "" : `Added "${name}", but it isn't in the card database, so check the spelling.`; S.saving = ""; recompute(); }
+      catch (e) { S.error = e.message; S.saving = ""; }
+      render();
+    }
+    else if (a === "wldel") { S.wlDel = el.dataset.name; render(); }
+    else if (a === "wldelno") { S.wlDel = ""; render(); }
+    else if (a === "wldelyes") {
+      const nm = el.dataset.name; S.wlDel = ""; S.saving = "Saving…"; render();
+      try { await removeFromWishlist(nm); S.saving = ""; recompute(); }
       catch (e) { S.error = e.message; S.saving = ""; }
       render();
     }
