@@ -161,6 +161,7 @@
         return d;
       }));
       if (!S.guest) try { S.wl = JSON.parse(await gh("wishlist.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.wl = []; }
+      try { S.tl = JSON.parse(await gh("tradelist.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.tl = null; }
       if (!S.guest) try { S.foilprio = JSON.parse(await gh("foilprio.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.foilprio = null; }
       if (!S.guest) try { S.landplan = JSON.parse(await gh("landplan.json", true)); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.landplan = null; }
       try { S.guides = new Set((await ghList("guides")).filter((f) => f.type === "file" && /\.html$/i.test(f.name)).map((f) => f.name.replace(/\.html$/i, ""))); } catch (e) { if (e.code === 401 || e.code === 403) throw e; S.guides = new Set(); }
@@ -1400,9 +1401,11 @@
     const wh = S.rows.length ? M.whereIs(k, S.decks, S.idx, S.own, S.claims, S.cfg) : null, nmz = S.zoom.name || name;
     const wl = S.wl.find((w) => norm(w.name) === norm(nmz));
     const where = wh ? `<div class="muted" style="margin-top:6px">${wh.decks.length ? "Played in: " + wh.decks.map((x) => esc(x.name) + (x.status !== "built" ? " (" + esc(x.status) + ")" : "")).join(", ") : "Not in any deck"}${wh.pencilIn.length ? "<br>Pencilled IN for: " + wh.pencilIn.map((x) => esc(x.name)).join(", ") : ""}${wh.pencilOut.length ? "<br>Pencilled OUT of: " + wh.pencilOut.map((x) => esc(x.name)).join(", ") : ""}${wh.total ? `<br>${wh.free} of ${wh.total} in free binders` : ""}</div>` : "";
+    const onTl = o && tlCards().some((c) => norm(c.name) === norm(o.name));
+    const tlbox = S.wtoken && o ? `<div style="margin-top:6px"><button class="btn alt" data-act="tladd" data-key="${esc(k)}">${onTl ? "Add one more to guest trade list" : "Add to guest trade list"}</button>${onTl ? `<button class="btn alt" data-act="tldel" data-key="${esc(k)}">Remove from guest trade list</button>` : ""}</div>${S.tlMsg ? `<div class="muted">${esc(S.tlMsg)}</div>` : ""}` : "";
     const wlbox = S.wtoken ? `<div class="muted" style="margin-top:6px">${wl ? "On the wishlist" + ((wl.decks || []).length ? " for " + esc(wl.decks.map((s2) => (deckBySlug(s2) || { name: s2 }).name || s2).join(", ")) : "") + ". " : ""}Add to wishlist for:</div><div class="row"><select id="wldeck"><option value="">no particular deck</option>${S.decks.map((x) => `<option value="${esc(x.slug)}" ${d && d.slug === x.slug ? "selected" : ""}>${esc(x.name || x.slug)}</option>`).join("")}</select><button class="btn" data-act="wladd" data-name="${esc(nmz)}">Add</button></div>` : "";
     return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${zi}${oracleBox(info, k)}${copies}
-      ${where}${wlbox}<div id="rulings" class="rul" data-sid="${esc(pr || "")}"></div>
+      ${where}${wlbox}${tlbox}<div id="rulings" class="rul" data-sid="${esc(pr || "")}"></div>
       <div>${ownPill(k, true)} ${o ? `<span class="muted">${[...o.binders].map(([b, q]) => esc(b) + " ×" + q).join(", ")}</span>` : ""}</div>
       ${info && d && !/\bLand\b/.test(info.frontType) ? `<div class="muted" style="margin-top:6px">Counts as (for ${esc(d.name || d.slug)}):</div><div class="chips">${M.ROLE_KEYS.map((r) => `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="${r}" class="${effRoles(d, k).includes(r) ? "on" : softRole(d, k, r) ? "maybe" : ""}">${{ ramp: "Ramp", draw: "Card advantage", targeted: "Targeted", mass: "Mass" }[r]}</button>`).join("")}${d.roles && d.roles[k] ? `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="auto">Reset to auto</button>` : ""}</div>` : ""}
       <button class="btn" data-act="closezoom">Close</button></div></div>`;
@@ -1732,6 +1735,7 @@
         <label class="muted">Flag cards worth at least (AUD)<br><input type="number" min="0" step="0.5" value="${S.flagPrice || ""}" id="flagprice" placeholder="off" style="width:90px"></label></div>
       <label class="muted" style="display:block;margin-top:8px"><input type="checkbox" id="showcommitted" ${S.showCommitted ? "checked" : ""}> Show a "In decks" column — and make Own count only the copies not committed to a deck</label>
       <div class="muted">Prices are what ManaBox has on each card in AUD (the price when you added it), not live market prices. Cards with no price are hidden when a minimum is set.</div></div>`;
+    h += tlCard();
     if (!t.length) return h + `<div class="card">Nothing spare right now.</div>`;
     h += `<div><button class="btn" data-act="tradecsv">Export ManaBox CSV</button><button class="btn alt" data-act="tradetext">Export text list</button><button class="btn alt" data-act="tradeall">${S.picked.size === t.length ? "Untick all" : "Tick all"}</button></div>
       <div class="muted" style="margin:6px 0">${t.length} cards · ${t.reduce((s, x) => s + x.tradeable, 0)} spare copies · about $${t.reduce((s, x) => s + (x.value || 0), 0).toFixed(2)} AUD in total. Ticked: ${t.filter((x) => S.picked.has(x.key)).length} cards, about $${t.filter((x) => S.picked.has(x.key)).reduce((s, x) => s + (x.value || 0), 0).toFixed(2)} AUD.</div>
@@ -1770,13 +1774,56 @@
     return h + addForm;
   }
 
+  /* ---------- Guest trade list (tradelist.json) ---------- */
+  const tlCards = () => ((S.tl && S.tl.cards) || []);
+  const tlSame = (a, b) => norm(a.name) === norm(b.name) && String(a.set).toLowerCase() === String(b.set).toLowerCase() && String(a.cn) === String(b.cn) && (a.foil || "") === (b.foil || "");
+  function tlFromRow(r, qty) {
+    const p = M.rowAUD(r);
+    return { name: r.name, set: String(r.set || "").toLowerCase(), cn: String(r.cn || ""), foil: /foil|etched/i.test(r.foil || "") && !/normal/i.test(r.foil || "") ? (r.foil || "foil") : "", qty, price: p != null ? Math.round(p * 100) / 100 : null, sid: r.sid || "" };
+  }
+  async function tlSave(cards, msg) {
+    if (!S.wtoken) { S.tlMsg = "Saving needs a write token (Data tab)."; render(); return; }
+    S.tlMsg = "Saving…"; render();
+    const url = `https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/contents/tradelist.json`, hd = { Authorization: "Bearer " + S.wtoken, Accept: "application/vnd.github+json" };
+    try {
+      const cur = await fetch(url + "?ref=" + encodeURIComponent(S.cfg.branch) + "&_=" + Date.now(), { headers: hd, cache: "no-store" }); let sha;
+      if (cur.ok) sha = (await cur.json()).sha; else if (cur.status !== 404) throw new Error("Couldn't read the saved list (" + cur.status + ").");
+      const data = { updated: new Date().toISOString().slice(0, 10), by: S.who || "", cards };
+      const r = await fetch(url, { method: "PUT", headers: hd, body: JSON.stringify({ message: `${msg}${S.who ? " [" + S.who + "]" : ""}`, content: b64(JSON.stringify(data, null, 1) + "\n"), sha, branch: S.cfg.branch }) });
+      if (!r.ok) throw new Error("GitHub " + r.status);
+      S.tl = data; S.tlMsg = "Saved.";
+    } catch (e) { S.tlMsg = "Save failed: " + e.message; }
+    render();
+  }
+  function tlCard() {
+    const n = tlCards().reduce((a, c) => a + c.qty, 0);
+    let h = `<div class="card"><b>Guest trade list</b><div class="muted">What guests see in the guest view: ${tlCards().length ? n + " cards (" + tlCards().length + " lines), saved " + esc((S.tl && S.tl.updated) || "") : "nothing yet"}.</div>`;
+    if (!S.wtoken) return h + `<div class="muted">Add a write token in Data to publish a list.</div></div>`;
+    h += `<div class="muted">Tick the cards below you want to offer, then publish. This replaces the saved list. You can also add a single card from its zoom screen.</div><div><button class="btn" data-act="tlpublish">Publish ticked cards</button>${tlCards().length ? `<button class="btn alt" data-act="tlclear">Clear the list</button>` : ""}</div>`;
+    if (S.tlMsg) h += `<div class="muted">${esc(S.tlMsg)}</div>`;
+    return h + `</div>`;
+  }
+  function guestTrades() {
+    const cards = tlCards();
+    const q = norm(S.gtq || "");
+    const list = cards.filter((c) => !q || norm(c.name).includes(q));
+    const total = cards.reduce((a, c) => a + (c.price != null ? c.price * c.qty : 0), 0);
+    return `<h2>For trade</h2><div class="muted">${cards.reduce((a, c) => a + c.qty, 0)} cards${total ? " · about A$" + total.toFixed(2) + " in total" : ""}${S.tl && S.tl.updated ? " · updated " + esc(S.tl.updated) : ""}. Prices are approximate (AUD).</div>
+      <input type="text" id="gtq" placeholder="Search the trade list…" value="${esc(S.gtq || "")}" autocomplete="off" style="width:100%;margin:6px 0"><div id="gtres">${guestTradeRows(list)}</div>`;
+  }
+  function guestTradeRows(list) {
+    if (!list.length) return `<div class="card muted">Nothing matches.</div>`;
+    return list.map((c) => `<div class="cardrow" data-act="zoom" data-key="${esc(M.keyOf(S.idx, c.name))}" data-slug="" data-sid="${esc(c.sid || "")}" data-name="${esc(c.name)}"><div class="t"><span class="n">${c.sid ? `<img class="thumb" loading="lazy" alt="" src="${esc(M.artUrl(c.sid, "art_crop"))}">` : ""}${c.qty > 1 ? c.qty + "× " : ""}${esc(plain(c.name))}</span><span>${c.price != null ? "A$" + (c.price >= 10 ? c.price.toFixed(0) : c.price.toFixed(2)) : ""}</span></div><div class="muted">${esc(String(c.set).toUpperCase())} #${esc(c.cn)}${c.foil ? " · foil" : ""}</div></div>`).join("");
+  }
   /* ---------- Guest view: decks + strategy guides only ---------- */
   function vGuest() {
     const d = S.deck && deckBySlug(S.deck);
+    const sw = !d && tlCards().length ? `<div class="chips vt">${["decks", "trades"].map((v) => `<button data-act="gtab" data-v="${v}" class="${(S.gtab || "decks") === v ? "on" : ""}">${{ decks: "Decks", trades: "For trade" }[v]}</button>`).join("")}</div>` : "";
+    if (!d && S.gtab === "trades" && tlCards().length) return sw + guestTrades();
     if (!d) {
       S.deck = null;
       if (!S.decks.length) return emptyMsg(S.busy ? "Loading…" : "No decks to show.");
-      return `<h2>Decks</h2><div class="tiles">` + S.decks.map((x) => {
+      return sw + `<h2>Decks</h2><div class="tiles">` + S.decks.map((x) => {
         const cm = M.commandersOf(x), tot = M.deckTotal(M.deckMap(x, S.idx));
         return `<div class="tile" data-act="open" data-slug="${esc(x.slug)}">${cm.length ? artImg(M.keyOf(S.idx, cm[0]), cm[0], x, "art_crop", "tileimg") : ""}<div class="tilein"><div class="row"><b>${esc(x.name || x.slug)}</b></div><div class="muted">${esc(cm.join(" + "))} · ${tot} cards</div></div></div>`;
       }).join("") + `</div>`;
@@ -1800,7 +1847,7 @@
   function guestZoom() {
     if (!S.zoom) return "";
     const k = S.zoom.key, info = M.cardInfo(S.idx, k), name = info ? info.name : k.replace(/^\?/, ""), d = deckBySlug(S.zoom.slug);
-    return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${artImg(k, name, d, "normal", "zimg")}${oracleBox(info, k)}<button class="btn" data-act="closezoom">Close</button></div></div>`;
+    return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${S.zoom.sid ? `<img class="zimg" alt="" src="${esc(M.artUrl(S.zoom.sid, "normal"))}" data-fb="${esc(M.artByName(name, "normal"))}">` : artImg(k, name, d, "normal", "zimg")}${oracleBox(info, k)}<button class="btn" data-act="closezoom">Close</button></div></div>`;
   }
   /* ---------- Share: QR codes ---------- */
   function qrSvg(text) {
@@ -1927,7 +1974,7 @@
     const el = ev.target.closest("[data-act]");
     if (!el) return;
     const a = el.dataset.act;
-    if (S.guest && !["open", "back", "guide", "guideclose", "zoom", "closezoom", "noop", "dview"].includes(a)) return;
+    if (S.guest && !["open", "back", "guide", "guideclose", "zoom", "closezoom", "noop", "dview", "gtab"].includes(a)) return;
     if (a === "toggle") { const o = el.querySelector("[data-o]"); if (o) o.hidden = !o.hidden; }
     else if (a === "open") { S.del = null; S.tk = null; S.deck = el.dataset.slug; pushNav("deck"); render(); window.scrollTo(0, 0); }
     else if (a === "guestqr") { S.guestQr = !S.guestQr; render(); }
@@ -2008,6 +2055,19 @@
     }
     else if (a === "tradeall") { const t = S._trades || []; S.picked = S.picked.size === t.length ? new Set() : new Set(t.map((x) => x.key)); render(); }
     else if (a === "pick") { el.checked ? S.picked.add(el.dataset.key) : S.picked.delete(el.dataset.key); render(); }
+    else if (a === "gtab") { S.gtab = el.dataset.v; render(); window.scrollTo(0, 0); }
+    else if (a === "tlpublish") {
+      const sel = (S._trades || []).filter((t) => S.picked.has(t.key));
+      tlSave(sel.flatMap((t) => t.alloc.map((r) => tlFromRow(r, r.qty))), "Guest trade list saved (" + sel.length + " cards)");
+    }
+    else if (a === "tlclear") tlSave([], "Guest trade list cleared");
+    else if (a === "tladd") {
+      const o = S.own.get(el.dataset.key); if (!o || !o.rows.length) return;
+      const r = o.rows[0], cur = tlCards().slice(), add = tlFromRow(r, 1), i = cur.findIndex((c) => tlSame(c, add));
+      if (i >= 0) cur[i] = { ...cur[i], qty: Math.min(cur[i].qty + 1, r.qty) }; else cur.push(add);
+      tlSave(cur, "Added " + r.name + " to the guest trade list");
+    }
+    else if (a === "tldel") { const o = S.own.get(el.dataset.key), nm = o ? o.name : ""; tlSave(tlCards().filter((c) => norm(c.name) !== norm(nm)), "Removed " + nm + " from the guest trade list"); }
     else if (a === "wishtext") showOut("Wishlist — still to find", (S._need || []).map((n) => "1 " + n).join("\n"), "wishlist.txt");
     else if (a === "savetok") { S.token = $("#tok").value.trim(); try { localStorage.setItem("mtg_token", S.token); } catch (e) { /* ignore */ } loadAll(); }
     else if (a === "bulkdone") bulkDone();
@@ -2156,6 +2216,7 @@
     }
     if (ev.target.id === "scname" && S.sc) { S.sc.name = ev.target.value; scSave(); }
     if (ev.target.id === "sccmd" && S.sc) { S.sc.cmdr = ev.target.value; scSave(); }
+    if (ev.target.id === "gtq") { S.gtq = ev.target.value; const r = $("#gtres"); if (r) { const q = norm(S.gtq); r.innerHTML = guestTradeRows(tlCards().filter((c) => !q || norm(c.name).includes(q))); } return; }
     if (ev.target.id === "findq") { S.findq = ev.target.value; peekHide(); clearTimeout(S._findT); S._findT = setTimeout(() => { const r = $("#findres"); if (r) r.innerHTML = findResults(S.findq); }, 150); return; }
     if (ev.target.id === "setq") { S.sv.q = ev.target.value; S.sv.limit = 200; peekHide(); clearTimeout(S._setT); S._setT = setTimeout(() => { const cl = setChecklist(S.sv.code, S.sv.mode), r = $("#setres"); if (cl && r) r.innerHTML = setResults(cl); }, 150); return; }
     if (ev.target.id === "setfind") { S.sv.find = ev.target.value; clearTimeout(S._setT); S._setT = setTimeout(() => { render(); const i = $("#setfind"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 250); return; }
