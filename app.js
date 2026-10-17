@@ -15,7 +15,7 @@
   /* ---------- phone back button: closes pop-ups, then leaves the deck ---------- */
   S.nav = []; S.ignorePop = 0;
   async function forceRefresh() {
-    const files = ["./", "index.html", "style.css", "app.js", "scan.js", "logic.js", "site-config.js", "manifest.json"];
+    const files = ["./", "index.html", "style.css", "app.js", "qrcode.js", "scan.js", "logic.js", "site-config.js", "manifest.json"];
     try { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister())); } catch (e) { /* no SW */ }
     try { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } catch (e) { /* no cache API */ }
     try { await Promise.all(files.map((f) => fetch(f, { cache: "reload" }))); } catch (e) { /* offline */ }
@@ -589,7 +589,7 @@
     const mm = S.decks.reduce((s, d) => s + M.activePencils(d).filter((p) => M.pencilStatus(p) === "made" && !M.isReflected(d, p, S.idx)).length, 0), age = csvAgeDays();
     const stale = S.rows.length && (mm || (age != null && age >= 7)) ? `<div class="card lvl-warn">${mm ? `<b>${mm} swap${mm > 1 ? "s" : ""} made by hand ${mm > 1 ? "aren't" : "isn't"} in the collection file yet.</b> Update ManaBox, export it and upload the new CSV (Data tab). ` : ""}${age != null && age >= 7 ? `The collection file is ${age} days old.` : ""}</div>` : "";
     const findbox = `<input type="text" id="findq" placeholder="Where is a card? Search your decks and collection…" value="${esc(S.findq || "")}" autocomplete="off" style="width:100%;margin:6px 0"><div id="findres">${findResults(S.findq || "")}</div>`;
-    const rbox = rq.length && S.reviewer ? `<div class="card"><b>Swaps to review (${rq.length})</b>${rq.map(({ d, p }) => `<div class="row" data-act="open" data-slug="${esc(d.slug)}" style="cursor:pointer"><span>${esc(d.name || d.slug)}: <b>${esc(p.in || "?")}</b>${p.out ? " for " + esc(p.out) : ""}<div class="muted">${esc(swapAuthor(p))}${(p.comments || []).length ? " — " + esc(p.comments[0].text) : ""}</div></span><span class="muted">open →</span></div>`).join("")}</div>` : "";
+    const rbox = rq.length && S.reviewer ? `<div class="card"><button class="btn rvbtn" data-act="rvtoggle" aria-expanded="${S.rvOpen ? "true" : "false"}">Swaps to review <span class="badge">${rq.length}</span><span class="chev">${S.rvOpen ? "▲" : "▼"}</span></button>${S.rvOpen ? rq.map(({ d, p }) => `<div class="row" data-act="open" data-slug="${esc(d.slug)}" style="cursor:pointer"><span>${esc(d.name || d.slug)}: <b>${esc(p.in || "?")}</b>${p.out ? " for " + esc(p.out) : ""}<div class="muted">${esc(swapAuthor(p))}${(p.comments || []).length ? " — " + esc(p.comments[0].text) : ""}</div></span><span class="muted">open →</span></div>`).join("") : ""}</div>` : "";
     return stale + rbox + `<div class="row"><button class="btn" data-act="scopen">Scan in a deck list</button>${S.rows.length ? `<button class="btn alt" data-act="landopen">Land tidy</button><button class="btn alt" data-act="fpopen">Foils &amp; sleeves</button>` : ""}</div>` + findbox + `<div class="tiles">` + S.decks.map((d) => {
       const m = M.deckMap(d, S.idx), tot = M.deckTotal(m), is = issuesFor(d.slug);
       const er = is.filter((i) => i.level === "error").length, wa = is.filter((i) => i.level === "warn").length;
@@ -1767,6 +1767,20 @@
     return h + addForm;
   }
 
+  /* ---------- Share: QR codes ---------- */
+  function qrSvg(text) {
+    try { const q = qrcode(0, "M"); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 6, margin: 3, scalable: true }); } catch (e) { return `<div class="muted">Couldn't make a QR code: ${esc(e.message)}</div>`; }
+  }
+  function shareCard() {
+    const appUrl = location.origin + location.pathname.replace(/index\.html$/, ""), glossUrl = "https://muzzaw43.github.io/mw-data/";
+    const one = (t, u) => `<div class="qrbox"><div class="qrimg">${qrSvg(u)}</div><div><b>${esc(t)}</b><div class="muted" style="word-break:break-all">${esc(u)}</div></div></div>`;
+    let h = `<h2>Share the apps</h2><div class="card"><div class="muted">Point a phone camera at a code to open the app.</div>${one("Deck tracker", appUrl)}${one("MTG glossary", glossUrl)}`;
+    if (S.token) {
+      h += `<div style="margin-top:10px"><button class="btn alt" data-act="guestqr">${S.guestQr ? "Hide guest code" : "Make guest code (includes your read-only token)"}</button></div>`;
+      if (S.guestQr) h += `<div class="card lvl-warn"><b>Anyone who scans this can read your private deck data.</b> It opens the tracker and fills in your read-only token for them; it can't change anything. Only show it to people you trust, and don't post it. If it gets out, delete the token in GitHub and make a new one.</div>${one("Guest sign-in for the tracker", appUrl + "#t=" + encodeURIComponent(S.token))}`;
+    } else h += `<div class="muted" style="margin-top:8px">Save your read-only token above and a guest sign-in code appears here.</div>`;
+    return h + `</div>`;
+  }
   function vData() {
     let h = `<h2>Access</h2><div class="card"><div class="muted">A read-only fine-grained GitHub token (Contents: read, only <b>${esc(S.cfg.dataRepo)}</b>). Stored in this browser only.</div>
       <input type="password" id="tok" placeholder="github_pat_…" autocomplete="off" value="${esc(S.token)}">
@@ -1777,6 +1791,7 @@
       <label class="muted" style="display:block;margin-top:6px"><input type="checkbox" id="isrev" ${S.reviewer ? "checked" : ""}> I review swaps other people add (shows a "to review" list)</label>
       <button class="btn" data-act="savewtok">Save</button>${S.wtoken ? `<button class="btn alt" data-act="forgetw">Forget write token</button>` : ""}</div>`;
     if (S.wtoken) h += `<h2>Update collection</h2><div class="card"><div class="muted">Pick a fresh ManaBox collection CSV. It replaces <b>collection/ManaBox_Collection.csv</b> in the data repo for everyone using it.</div><input type="file" id="upcsv"><div class="muted" style="margin-top:4px">Any file can be picked here; it is checked to be a ManaBox collection export before anything is uploaded.</div></div>`;
+    h += shareCard();
     h += reconCard();
     if (S.log.length) h += `<div class="card muted">${S.log.map(esc).join("<br>")}</div>`;
     h += `<h2>Load local files</h2><div class="card"><div class="muted">Try things without the token: pick a ManaBox CSV and/or deck JSON files. Nothing leaves your device.</div>
@@ -1874,6 +1889,8 @@
     const a = el.dataset.act;
     if (a === "toggle") { const o = el.querySelector("[data-o]"); if (o) o.hidden = !o.hidden; }
     else if (a === "open") { S.del = null; S.tk = null; S.deck = el.dataset.slug; pushNav("deck"); render(); window.scrollTo(0, 0); }
+    else if (a === "guestqr") { S.guestQr = !S.guestQr; render(); }
+    else if (a === "rvtoggle") { S.rvOpen = !S.rvOpen; render(); }
     else if (a === "guide") { openGuide(el.dataset.slug); }
     else if (a === "guideclose") { removeGuide(); popNav("guide"); }
     else if (a === "fpopen") { S.fp = true; S.deck = null; pushNav("foils"); render(); window.scrollTo(0, 0); }
@@ -2158,5 +2175,13 @@
   });
 
   status(); render();
+  try {
+    const m = /[#&]t=([^&]+)/.exec(location.hash || "");
+    if (m) {
+      const t = decodeURIComponent(m[1]).trim();
+      history.replaceState(history.state, "", location.pathname + location.search); // remove the token from the address bar
+      if (t && !S.wtoken) { S.token = t; try { localStorage.setItem("mtg_token", t); } catch (e) { /* ignore */ } }
+    }
+  } catch (e) { /* ignore */ }
   if (S.token) loadAll();
 })();
