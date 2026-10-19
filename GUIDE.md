@@ -171,6 +171,7 @@ GitHub pauses scheduled jobs in a repository nothing has happened in for about t
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Last CSV name and upload time (19 Oct 2026):** the Data tab now shows the file name of the last collection CSV (for example `ManaBox_Collection 20261018.csv`) and the date and time it was uploaded. The Collection line on the binders view and the status bar use the same name.
 - **No Copy ManaBox List button in the app's guide viewer (18 Oct 2026):** the strategy guides opened inside the app no longer show the Copy ManaBox List button.
 - **Back-to-top in strategy guides (18 Oct 2026):** the fixed bar at the top of a strategy guide now has an **↑ Top** button on the right that scrolls the guide back to the start.
 - **Guest trade list (18 Oct 2026):** the Trades tab has a new **Guest trade list** card. Untick the cards you don't want to offer (all spares are ticked to start), then tap **Publish ticked cards**; this needs your write token and saves `tradelist.json` in the data repo. You can also open any card you own and tap **Add to guest trade list** (or remove it). Guests then get a **For trade** button next to Decks in the guest view, with a search box, card images, the set, quantity and an approximate AUD price. Nothing is published until you tap Publish.

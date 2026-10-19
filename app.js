@@ -170,7 +170,7 @@
       if (csvs.length) { const fixed = csvs.find((f) => f.name === "ManaBox_Collection.csv"); name = (fixed || csvs[csvs.length - 1]).name; text = await gh("collection/" + name, true); }
       await dbP;
       if (text) { S.rows = M.parseCollection(text); S.csvName = name; }
-      if (text) { try { const cr = await fetch(`https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/commits?path=${encodeURIComponent("collection/" + name)}&per_page=1&sha=${encodeURIComponent(S.cfg.branch)}`, { headers: { Authorization: "Bearer " + S.token, Accept: "application/vnd.github+json" } }); const cj = cr.ok ? await cr.json() : null; S.csvAt = Array.isArray(cj) && cj[0] ? cj[0].commit.committer.date : ""; } catch (e) { S.csvAt = ""; } }
+      if (text) { try { const cr = await fetch(`https://api.github.com/repos/${S.cfg.owner}/${S.cfg.dataRepo}/commits?path=${encodeURIComponent("collection/" + name)}&per_page=1&sha=${encodeURIComponent(S.cfg.branch)}`, { headers: { Authorization: "Bearer " + S.token, Accept: "application/vnd.github+json" } }); const cj = cr.ok ? await cr.json() : null; S.csvAt = Array.isArray(cj) && cj[0] ? cj[0].commit.committer.date : ""; const mm = Array.isArray(cj) && cj[0] ? /(?:Collection update|sync)[^:]*:\s*(.+?\.csv)/i.exec(cj[0].commit.message || "") : null; S.csvSrc = mm ? mm[1] : ""; } catch (e) { S.csvAt = ""; S.csvSrc = ""; } }
       S.log.push(`Decks found: ${S.decks.length}` + (deckFiles.length ? "" : " (no .json files in decks/)"));
       S.log.push(text ? `Collection: ${name} (${S.rows.length} rows)` : "Collection: no .csv found in collection/");
       S.log.push(`Card DB: ${S.dbCount} cards`);
@@ -297,7 +297,7 @@
         const hint = pr.status === 403 || pr.status === 401 ? " This device's write token is probably read-only, expired, or not allowed to write to " + S.cfg.dataRepo + " (it needs Contents: Read and write). Check it in Data." : pr.status === 409 || pr.status === 422 ? " The file changed on GitHub meanwhile; reload and try again." : "";
         throw new Error("Upload failed: GitHub " + pr.status + (why ? " (" + why + ")" : "") + "." + hint);
       }
-      S.rows = rows; S.csvName = "ManaBox_Collection.csv"; S.csvAt = new Date().toISOString();
+      S.rows = rows; S.csvName = "ManaBox_Collection.csv"; S.csvAt = new Date().toISOString(); S.csvSrc = file.name;
       S.log.push(`Uploaded ${file.name}: ${rows.length} rows (was ${oldN})`);
       S.saving = ""; recompute(); S.tab = "data"; S.deck = null; resetNav();
     } catch (e) { S.error = e.message; S.saving = ""; }
@@ -497,14 +497,16 @@
     if (S.busy) bits.push(S.busy);
     else {
       if (S.decks.length) bits.push(S.decks.length + " decks");
-      if (S.csvName) bits.push("CSV " + S.csvName);
+      if (S.csvName) bits.push("CSV " + (S.csvSrc || S.csvName));
     }
     $("#status").textContent = bits.join(" · ");
   }
 
   /* ---------- helpers ---------- */
   const deckBySlug = (s) => S.decks.find((d) => d.slug === s);
-  const csvDate = () => { const m = /(\d{8})/.exec(S.csvName); return m ? `${m[1].slice(6)}/${m[1].slice(4, 6)}/${m[1].slice(0, 4)}` : ""; };
+  const csvDate = () => { const m = /(\d{8})/.exec(S.csvSrc || S.csvName); return m ? `${m[1].slice(6)}/${m[1].slice(4, 6)}/${m[1].slice(0, 4)}` : ""; };
+  const csvWhen = () => { if (!S.csvAt) return ""; const d = new Date(S.csvAt); return isNaN(d) ? "" : d.toLocaleString("en-AU", { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }); };
+  const csvLabel = () => (S.csvSrc || S.csvName || "") + (csvWhen() ? " · uploaded " + csvWhen() : "");
   const issuesFor = (slug) => S.checks.filter((c) => c.deck === slug);
   const TYPE_ORDER = ["Commander", "Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land", "Other"];
   // Orders cards the way the deck screen groups them (commander, creatures, … lands), A–Z within each; no headings.
@@ -1575,7 +1577,7 @@
     if (f.view === "sets") return h + vSets();
     if (f.view === "binders") {
       const bs = M.binderSummary(S.rows);
-      h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders, worth about $${bs.reduce((s, b) => s + b.value, 0).toFixed(0)} AUD (${S.live ? "live market prices from Scryfall, converted to AUD" : "the prices ManaBox holds, until live prices load"}). Tap a binder to look inside.${S.csvName ? ` Collection updated ${esc(csvDate() || S.csvName)}.` : ""}</div></div>`;
+      h += `<div class="muted">${S.rows.reduce((s, r) => s + r.qty, 0)} cards in ${bs.length} binders, worth about $${bs.reduce((s, b) => s + b.value, 0).toFixed(0)} AUD (${S.live ? "live market prices from Scryfall, converted to AUD" : "the prices ManaBox holds, until live prices load"}). Tap a binder to look inside.${S.csvName ? ` Collection: ${esc(S.csvSrc || S.csvName)}${csvWhen() ? ", uploaded " + esc(csvWhen()) : ""}.` : ""}</div></div>`;
       const tile = (b) => {
         const dk = S.decks.find((d) => norm(d.name) === norm(b.name)), cmd = dk ? M.commandersOf(dk) : [];
         const img = cmd.length ? artImg(M.keyOf(S.idx, cmd[0]), cmd[0], dk, "art_crop", "tileimg") : b.sid ? `<img class="tileimg" loading="lazy" alt="" src="${esc(M.artUrl(b.sid))}">` : "";
@@ -1885,7 +1887,7 @@
       const byB = new Map(); let total = 0;
       for (const r of S.rows) { byB.set(r.binder, (byB.get(r.binder) || 0) + r.qty); total += r.qty; }
       const fr = new Set(S.cfg.freeBinders.map(norm)), mu = new Set(S.cfg.multiCopyBinders.map(norm));
-      h += `<div class="card"><b>${total}</b> cards · ${S.own.size} unique · ${esc(S.csvName)}${csvDate() ? " (" + csvDate() + ")" : ""}</div><table><tr><th>Binder</th><th>Cards</th><th></th></tr>` +
+      h += `<div class="card"><b>${total}</b> cards · ${S.own.size} unique<div class="muted">Last CSV: <b>${esc(S.csvSrc || S.csvName)}</b>${csvWhen() ? "<br>Uploaded " + esc(csvWhen()) : ""}${S.csvSrc && S.csvSrc !== S.csvName ? "<br>Stored as " + esc(S.csvName) : ""}</div></div><table><tr><th>Binder</th><th>Cards</th><th></th></tr>` +
         [...byB].sort((a, b) => b[1] - a[1]).map(([b, q]) => `<tr><td>${esc(b)}</td><td>${q}</td><td>${fr.has(norm(b)) ? '<span class="pill ok">free</span>' : mu.has(norm(b)) ? '<span class="pill ok">free (2+ copies)</span>' : '<span class="pill">locked</span>'}</td></tr>`).join("") + `</table>`;
     }
     h += `<h2>Card DB</h2><div class="card muted">${S.idx ? S.dbCount + " cards loaded from " + esc(S.cfg.dbUrl) : "Not loaded yet."}</div>`;
