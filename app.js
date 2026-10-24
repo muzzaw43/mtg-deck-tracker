@@ -1759,9 +1759,9 @@
   const shopSave = (arr) => { try { localStorage.setItem("mtg_shop", JSON.stringify(arr)); } catch (e) { /* storage blocked */ } };
   function shopList() { const names = S._shopNames || []; const ticked = new Set(shopLoad().map((n) => norm(n))); return names.filter((n) => ticked.has(norm(n))); }
   function shopBarHtml() {
-    const n = shopList().length;
-    if (!n) return "";
-    return `<div class="row shopbar"><button class="btn" data-act="shopcopy">Copy ticked (${n})</button><button class="btn alt" data-act="shopclear">Clear ticks</button><span class="muted" id="shopmsg"></span></div>`;
+    const l = shopList();
+    if (!l.length) return `<h3>Your list</h3><div class="card"><div class="muted">Nothing ticked yet. Tick cards below to build a plain list you can read or copy in a shop.</div></div>`;
+    return `<h3>Your list</h3><div class="card"><div class="shoplist">${l.map((n) => esc(n)).join("<br>")}</div><div class="row"><button class="btn" data-act="shopcopy">Copy list (${l.length})</button><button class="btn alt" data-act="shopclear">Clear ticks</button></div><div class="muted" id="shopmsg"></div></div>`;
   }
   function vWishlist() {
     const delBox = (name) => !S.wtoken ? "" : S.wlDel && norm(S.wlDel) === norm(name)

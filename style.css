@@ -189,4 +189,3 @@ body.guest #tabs{display:none}
 .shopwrap{display:flex;align-items:flex-start;gap:8px}
 .shopchk{width:24px;height:24px;margin:14px 0 0;flex:none}
 .shopmain{flex:1;min-width:0}
-.shopbar{position:sticky;top:0;z-index:5;background:var(--bg,#fff);padding:6px 0;align-items:center}
