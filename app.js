@@ -1758,19 +1758,10 @@
   const shopLoad = () => { try { const j = JSON.parse(localStorage.getItem("mtg_shop") || "[]"); return Array.isArray(j) ? j : []; } catch (e) { return []; } };
   const shopSave = (arr) => { try { localStorage.setItem("mtg_shop", JSON.stringify(arr)); } catch (e) { /* storage blocked */ } };
   function shopList() { const names = S._shopNames || []; const ticked = new Set(shopLoad().map((n) => norm(n))); return names.filter((n) => ticked.has(norm(n))); }
-  function shopListHtml() {
-    const l = shopList();
-    if (!l.length) return `<div class="muted">Nothing ticked yet. Tick cards above to build your list.</div>`;
-    return `<div class="shoplist">${l.map((n) => esc(n)).join("<br>")}</div><div class="row"><button class="btn" data-act="shopcopy">Copy list (${l.length})</button><button class="btn alt" data-act="shopclear">Clear ticks</button></div><div class="muted" id="shopmsg"></div>`;
-  }
-  function shopCard(find) {
-    const items = find.map((w) => ({ name: w.info ? w.info.name : w.name, decks: (w.decks || []).map((sl) => (deckBySlug(sl) || { name: sl }).name || sl).join(", ") }));
-    S._shopNames = items.map((i) => i.name);
-    if (!items.length) return "";
-    const ticked = new Set(shopLoad().map((n) => norm(n)));
-    return `<h3>Shopping list</h3><div class="card"><div class="muted">Tick the cards you are after in the shop. Your ticks stay on this device and appear below as a plain list you can read or copy.</div>`
-      + items.map((i) => `<label class="shoprow"><input type="checkbox" data-shop="${esc(i.name)}"${ticked.has(norm(i.name)) ? " checked" : ""}><span>${esc(i.name)}${i.decks ? ` <span class="muted">· ${esc(i.decks)}</span>` : ""}</span></label>`).join("")
-      + `<div class="row"><button class="btn alt" data-act="shopall">Tick all</button></div><h3>Your list</h3><div id="shoplistbox">${shopListHtml()}</div></div>`;
+  function shopBarHtml() {
+    const n = shopList().length;
+    if (!n) return "";
+    return `<div class="row shopbar"><button class="btn" data-act="shopcopy">Copy ticked (${n})</button><button class="btn alt" data-act="shopclear">Clear ticks</button><span class="muted" id="shopmsg"></span></div>`;
   }
   function vWishlist() {
     const delBox = (name) => !S.wtoken ? "" : S.wlDel && norm(S.wlDel) === norm(name)
@@ -1778,8 +1769,9 @@
       : `<div><button class="btn alt" data-act="wldel" data-name="${esc(name)}">Remove from wishlist</button></div>`;
     const addForm = S.wtoken ? `<h3>Add a card</h3><div class="card"><input type="text" id="wlname" placeholder="Start typing a card name…" autocomplete="off" autocapitalize="off" spellcheck="false"><div id="wlsug" class="sugg"></div><div class="row"><select id="wldecknew"><option value="">no particular deck</option>${S.decks.map((x) => `<option value="${esc(x.slug)}">${esc(x.name || x.slug)}</option>`).join("")}</select></div><input type="text" id="wlnote" placeholder="Note (optional)" autocomplete="off" style="margin-top:6px"><button class="btn" data-act="wlnew" style="margin-top:6px">Add to wishlist</button>${S.wlMsg ? `<div class="muted" style="margin-top:6px">${esc(S.wlMsg)}</div>` : ""}</div>` : `<div class="muted" style="margin-top:6px">To add or remove cards here, add a write token in the Data tab.</div>`;
     if (!S.wl.length && !S.decks.some((d) => (d.wishlist || []).length)) return `<h2>Wishlist</h2>` + emptyMsg("Nothing on the wishlist.") + addForm;
-    const sec = (title, list, open) => list.length ? `<h3>${title} (${list.length})</h3>` + list.map((w) => cardRow(w.key, w.name, 1, "", open, wishPill(w) + (w.kind && w.kind !== "want" ? ` <span class="pill">${esc(w.kind)}</span>` : ""), null)
-      + `<div class="muted">${esc((w.decks || []).map((sl) => (deckBySlug(sl) || { name: sl }).name || sl).join(", "))}${w.note ? " — " + esc(w.note) : ""}</div>` + delBox(w.name)).join("") : "";
+    const names = [], ticked = new Set(shopLoad().map((n) => norm(n)));
+    const sec = (title, list, open) => list.length ? `<h3>${title} (${list.length})</h3>` + list.map((w) => { const nm = w.info ? w.info.name : w.name; names.push(nm); return `<div class="shopwrap"><input type="checkbox" class="shopchk" data-shop="${esc(nm)}" aria-label="Tick ${esc(nm)}"${ticked.has(norm(nm)) ? " checked" : ""}><div class="shopmain">` + cardRow(w.key, w.name, 1, "", open, wishPill(w) + (w.kind && w.kind !== "want" ? ` <span class="pill">${esc(w.kind)}</span>` : ""), null)
+      + `<div class="muted">${esc((w.decks || []).map((sl) => (deckBySlug(sl) || { name: sl }).name || sl).join(", "))}${w.note ? " — " + esc(w.note) : ""}</div>` + delBox(w.name) + `</div></div>`; }).join("") : "";
     const ev = S.wlEval;
     const find = ev.filter((w) => ["missing", "partial"].includes(w.status) && !w.madeIn);
     const scan = ev.filter((w) => w.status === "missing" && w.madeIn);
@@ -1787,8 +1779,9 @@
     const unused = ev.filter((w) => w.status === "unused");
     const placed = ev.filter((w) => w.status === "placed");
     let h = `<h2>Wishlist</h2><div class="muted">Cards clear themselves once your collection has enough copies for every deck that wants them. ${S.csvName ? "Based on " + esc(S.csvName) + "." : "Load a collection CSV to clear cards."}</div>`;
-    h += shopCard(find);
-    h += sec("Still to find", find) + sec("In a deck by hand, not in ManaBox", scan) + sec("Have it — swap pending", have) + sec("In collection, no pending use — still wanted?", unused);
+    const body = sec("Still to find", find) + sec("In a deck by hand, not in ManaBox", scan) + sec("Have it — swap pending", have) + sec("In collection, no pending use — still wanted?", unused);
+    S._shopNames = names;
+    h += `<div id="shopbarbox">${shopBarHtml()}</div>` + body;
     if (placed.length) h += `<h3>Cleared: in the deck (${placed.length})</h3>` + (S.wtoken ? placed.map((w) => `<div class="muted">${esc(w.name)}</div>` + delBox(w.name)).join("") : `<div class="muted">${placed.map((w) => esc(w.name)).join(", ")}</div>`);
     S._need = find.map((w) => w.info ? w.info.name : w.name).sort();
     if (S._need.length) h += `<div style="margin-top:10px"><button class="btn" data-act="wishtext">Export "still to find" as text</button></div>`;
@@ -2091,9 +2084,8 @@
       tlSave(cur, "Added " + r.name + " to the guest trade list");
     }
     else if (a === "tldel") { const o = S.own.get(el.dataset.key), nm = o ? o.name : ""; tlSave(tlCards().filter((c) => norm(c.name) !== norm(nm)), "Removed " + nm + " from the guest trade list"); }
-    else if (a === "shopcopy") { const ok = await copyText(shopList().join("\n")); const m = $("#shopmsg"); if (m) m.textContent = ok ? "Copied." : "Couldn't copy — select the list above and copy it by hand."; }
-    else if (a === "shopclear") { shopSave([]); document.querySelectorAll("[data-shop]").forEach((x) => { x.checked = false; }); const bx = $("#shoplistbox"); if (bx) bx.innerHTML = shopListHtml(); }
-    else if (a === "shopall") { shopSave((S._shopNames || []).slice()); document.querySelectorAll("[data-shop]").forEach((x) => { x.checked = true; }); const bx = $("#shoplistbox"); if (bx) bx.innerHTML = shopListHtml(); }
+    else if (a === "shopcopy") { const ok = await copyText(shopList().join("\n")); const m = $("#shopmsg"); if (m) m.textContent = ok ? "Copied." : "Couldn't copy on this device."; }
+    else if (a === "shopclear") { shopSave([]); document.querySelectorAll("[data-shop]").forEach((x) => { x.checked = false; }); const bx = $("#shopbarbox"); if (bx) bx.innerHTML = shopBarHtml(); }
     else if (a === "wishtext") showOut("Wishlist — still to find", (S._need || []).map((n) => "1 " + n).join("\n"), "wishlist.txt");
     else if (a === "savetok") { S.token = $("#tok").value.trim(); try { localStorage.setItem("mtg_token", S.token); } catch (e) { /* ignore */ } loadAll(); }
     else if (a === "bulkdone") bulkDone();
@@ -2255,7 +2247,7 @@
     if (ev.target.dataset && ev.target.dataset.shop !== undefined) {
       const nm = ev.target.dataset.shop, cur = shopLoad().filter((n) => norm(n) !== norm(nm));
       if (ev.target.checked) cur.push(nm);
-      shopSave(cur); const bx = $("#shoplistbox"); if (bx) bx.innerHTML = shopListHtml(); return;
+      shopSave(cur); const bx = $("#shopbarbox"); if (bx) bx.innerHTML = shopBarHtml(); return;
     }
     if (ev.target.dataset && ev.target.dataset.cf) {
       const f = CF(), k = ev.target.dataset.cf, v = ev.target.value;
