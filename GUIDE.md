@@ -171,6 +171,7 @@ GitHub pauses scheduled jobs in a repository nothing has happened in for about t
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Shopping list on the Wishlist tab (24 Oct 2026):** a new **Shopping list** card sits above "Still to find". Tick the cards you want in a store and **Your list** underneath shows just those names, one per line. **Copy list** puts plain card names on the clipboard, **Clear ticks** empties it and **Tick all** ticks everything. Ticks are remembered on that device only.
 - **Last CSV name and upload time (19 Oct 2026):** the Data tab now shows the file name of the last collection CSV (for example `ManaBox_Collection 20261018.csv`) and the date and time it was uploaded. The Collection line on the binders view and the status bar use the same name.
 - **No Copy ManaBox List button in the app's guide viewer (18 Oct 2026):** the strategy guides opened inside the app no longer show the Copy ManaBox List button.
 - **Back-to-top in strategy guides (18 Oct 2026):** the fixed bar at the top of a strategy guide now has an **↑ Top** button on the right that scrolls the guide back to the start.

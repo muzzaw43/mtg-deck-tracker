@@ -1754,6 +1754,24 @@
     if (w.status === "missing" && w.madeIn) return `<span class="pill todo">in deck by hand — scan it in</span>`;
     return `<span class="pill ${c}">${esc(t + extra)}</span>`;
   }
+  /* ---------- Shopping list: tick wishlist cards, read/copy a plain list (kept on this device) ---------- */
+  const shopLoad = () => { try { const j = JSON.parse(localStorage.getItem("mtg_shop") || "[]"); return Array.isArray(j) ? j : []; } catch (e) { return []; } };
+  const shopSave = (arr) => { try { localStorage.setItem("mtg_shop", JSON.stringify(arr)); } catch (e) { /* storage blocked */ } };
+  function shopList() { const names = S._shopNames || []; const ticked = new Set(shopLoad().map((n) => norm(n))); return names.filter((n) => ticked.has(norm(n))); }
+  function shopListHtml() {
+    const l = shopList();
+    if (!l.length) return `<div class="muted">Nothing ticked yet. Tick cards above to build your list.</div>`;
+    return `<div class="shoplist">${l.map((n) => esc(n)).join("<br>")}</div><div class="row"><button class="btn" data-act="shopcopy">Copy list (${l.length})</button><button class="btn alt" data-act="shopclear">Clear ticks</button></div><div class="muted" id="shopmsg"></div>`;
+  }
+  function shopCard(find) {
+    const items = find.map((w) => ({ name: w.info ? w.info.name : w.name, decks: (w.decks || []).map((sl) => (deckBySlug(sl) || { name: sl }).name || sl).join(", ") }));
+    S._shopNames = items.map((i) => i.name);
+    if (!items.length) return "";
+    const ticked = new Set(shopLoad().map((n) => norm(n)));
+    return `<h3>Shopping list</h3><div class="card"><div class="muted">Tick the cards you are after in the shop. Your ticks stay on this device and appear below as a plain list you can read or copy.</div>`
+      + items.map((i) => `<label class="shoprow"><input type="checkbox" data-shop="${esc(i.name)}"${ticked.has(norm(i.name)) ? " checked" : ""}><span>${esc(i.name)}${i.decks ? ` <span class="muted">· ${esc(i.decks)}</span>` : ""}</span></label>`).join("")
+      + `<div class="row"><button class="btn alt" data-act="shopall">Tick all</button></div><h3>Your list</h3><div id="shoplistbox">${shopListHtml()}</div></div>`;
+  }
   function vWishlist() {
     const delBox = (name) => !S.wtoken ? "" : S.wlDel && norm(S.wlDel) === norm(name)
       ? `<div class="row dangerzone armed"><span class="muted">Remove <b>${esc(name)}</b> from the wishlist?</span><button class="btn danger" data-act="wldelyes" data-name="${esc(name)}">Yes, remove</button><button class="btn alt" data-act="wldelno">Keep</button></div>`
@@ -1769,6 +1787,7 @@
     const unused = ev.filter((w) => w.status === "unused");
     const placed = ev.filter((w) => w.status === "placed");
     let h = `<h2>Wishlist</h2><div class="muted">Cards clear themselves once your collection has enough copies for every deck that wants them. ${S.csvName ? "Based on " + esc(S.csvName) + "." : "Load a collection CSV to clear cards."}</div>`;
+    h += shopCard(find);
     h += sec("Still to find", find) + sec("In a deck by hand, not in ManaBox", scan) + sec("Have it — swap pending", have) + sec("In collection, no pending use — still wanted?", unused);
     if (placed.length) h += `<h3>Cleared: in the deck (${placed.length})</h3>` + (S.wtoken ? placed.map((w) => `<div class="muted">${esc(w.name)}</div>` + delBox(w.name)).join("") : `<div class="muted">${placed.map((w) => esc(w.name)).join(", ")}</div>`);
     S._need = find.map((w) => w.info ? w.info.name : w.name).sort();
@@ -2072,6 +2091,9 @@
       tlSave(cur, "Added " + r.name + " to the guest trade list");
     }
     else if (a === "tldel") { const o = S.own.get(el.dataset.key), nm = o ? o.name : ""; tlSave(tlCards().filter((c) => norm(c.name) !== norm(nm)), "Removed " + nm + " from the guest trade list"); }
+    else if (a === "shopcopy") { const ok = await copyText(shopList().join("\n")); const m = $("#shopmsg"); if (m) m.textContent = ok ? "Copied." : "Couldn't copy — select the list above and copy it by hand."; }
+    else if (a === "shopclear") { shopSave([]); document.querySelectorAll("[data-shop]").forEach((x) => { x.checked = false; }); const bx = $("#shoplistbox"); if (bx) bx.innerHTML = shopListHtml(); }
+    else if (a === "shopall") { shopSave((S._shopNames || []).slice()); document.querySelectorAll("[data-shop]").forEach((x) => { x.checked = true; }); const bx = $("#shoplistbox"); if (bx) bx.innerHTML = shopListHtml(); }
     else if (a === "wishtext") showOut("Wishlist — still to find", (S._need || []).map((n) => "1 " + n).join("\n"), "wishlist.txt");
     else if (a === "savetok") { S.token = $("#tok").value.trim(); try { localStorage.setItem("mtg_token", S.token); } catch (e) { /* ignore */ } loadAll(); }
     else if (a === "bulkdone") bulkDone();
@@ -2230,6 +2252,11 @@
     if (ev.target.id === "chq" && S.ch) { S.ch.q = ev.target.value; peekHide(); $("#chres").innerHTML = chooserResults(); }
   });
   document.addEventListener("change", async (ev) => {
+    if (ev.target.dataset && ev.target.dataset.shop !== undefined) {
+      const nm = ev.target.dataset.shop, cur = shopLoad().filter((n) => norm(n) !== norm(nm));
+      if (ev.target.checked) cur.push(nm);
+      shopSave(cur); const bx = $("#shoplistbox"); if (bx) bx.innerHTML = shopListHtml(); return;
+    }
     if (ev.target.dataset && ev.target.dataset.cf) {
       const f = CF(), k = ev.target.dataset.cf, v = ev.target.value;
       if (k === "ciDeck") { f.ciDeck = v; f.ci = new Set(); const dk = S.decks.find((d) => d.slug === v); if (dk) { const cmd = M.commandersOf(dk); const set = new Set(); cmd.forEach((c) => { const i = M.cardInfo(S.idx, M.keyOf(S.idx, c)); if (i) i.ci.forEach((x) => set.add(x)); }); f.ci = set; f.ciDeck = v; } }

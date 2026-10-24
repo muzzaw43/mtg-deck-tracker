@@ -181,3 +181,7 @@ tr.flag td{background:rgba(230,180,80,.16)}
 
 body.guest #tabs{display:none}
 .guidetop{margin-left:auto}
+
+.shoprow{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line,#8884);cursor:pointer;font-size:15px}
+.shoprow input{width:22px;height:22px;flex:none}
+.shoplist{margin:8px 0;padding:10px 12px;border:1px solid var(--line,#8886);border-radius:8px;font-size:16px;line-height:1.6;user-select:text;-webkit-user-select:text}
