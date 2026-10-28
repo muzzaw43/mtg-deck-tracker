@@ -1226,7 +1226,7 @@
       ${pens.some((p) => M.pencilStatus(p) === "made") ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="physical">Export list as it is physically</button>` : ""}
       ${pens.some((p) => ["approved", "made"].includes(M.pencilStatus(p))) ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with confirmed changes</button>` : ""}
       ${allPend.length ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="all">Export with all pending swaps (${allPend.length})</button>` : ""}</div>
-      ${pens.some((p) => M.pencilStatus(p) === "pencilled") ? `<div class="muted">Pencilled swaps are only in "Export with all pending swaps" until you approve them.${skipPend ? ` ${skipPend} pending swap${skipPend > 1 ? "s" : ""} left out of that export (no cut or no incoming card chosen yet).` : ""}</div>` : ""}`;
+      ${pens.some((p) => M.pencilStatus(p) === "pencilled") ? `<div class="muted">Pencilled swaps are only in "Export with all pending swaps" until they are made.${skipPend ? ` ${skipPend} pending swap${skipPend > 1 ? "s" : ""} left out of that export (no cut or no incoming card chosen yet).` : ""}</div>` : ""}`;
     const pre = h + (S.statsOpen ? statsPanel(d) : "") + (S.upgOpen ? upgradePanel(d) : ""); h = "";
     h += sleeveBox(d);
     const is = issuesFor(d.slug);
@@ -1236,7 +1236,7 @@
       const i = (d.pencilled || []).indexOf(p), st = M.pencilStatus(p);
       const und = lastUndo(p) >= 0 ? btn(i, "undo", "Undo last change", 1) : "";
       const btns = !S.wtoken ? "" : st === "made" ? btn(i, "done", "Mark done") + btn(i, "change", "Different card", 1) + btn(i, "cancel", "Cancel", 1) + und + btn(i, "comment", "Comment", 1)
-        : (st === "approved" ? "" : btn(i, "approve", "Approve")) + btn(i, "made", "I made it") + btn(i, "change", "Different IN card", 1) + btn(i, "changeout", p.out ? "Change cut" : "Choose cut", 1) + btn(i, "cancel", "Cancel", 1) + und + btn(i, "comment", "Comment", 1);
+        : btn(i, "made", "I made it") + btn(i, "change", "Different IN card", 1) + btn(i, "changeout", p.out ? "Change cut" : "Choose cut", 1) + btn(i, "cancel", "Cancel", 1) + und + btn(i, "comment", "Comment", 1);
       const au = swapAuthor(p), rv = needsReview(p);
       let x = `<div class="card"><span class="pill ${cls}">${esc(p.status || "pencilled")}</span> ${au && au !== "me" ? `<span class="muted">added by ${esc(au)}</span> ` : ""}${rv ? (S.reviewer ? `<span class="pill todo">needs your review</span> ` : `<span class="pill">awaiting review</span> `) : p.reviewed && p.reviewed.by && norm(p.reviewed.by) !== norm(au) ? `<span class="muted">reviewed by ${esc(p.reviewed.by)}</span> ` : ""}${p.note ? `<span class="muted">${esc(p.note)}</span>` : ""}`;
       const side = (nm, role) => {

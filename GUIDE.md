@@ -117,7 +117,7 @@ Give them the site address and a token for the same data repo (read-only to just
 | **Data** | Tokens, upload a new CSV, and a log of what loaded. |
 
 ### Swaps
-A swap is a card going OUT and a card coming IN. It moves through **pencilled → approved → made → done**. Nothing changes on its own: you decide each step, and "made" means you've physically swapped the cards but ManaBox isn't updated yet. After you update ManaBox and re-upload the CSV, the app recognises it and marks it reflected.
+A swap is a card going OUT and a card coming IN. It moves through **pencilled → made → done**. Nothing changes on its own: you decide each step, and "made" means you've physically swapped the cards but ManaBox isn't updated yet. After you update ManaBox and re-upload the CSV, the app recognises it and marks it reflected.
 
 ### Upgrade finder
 On a deck, tap **Upgrade finder**. It shows cards you already own, in the deck's colours, that are not locked in another built deck and that fill a role the deck is short on (ramp, card advantage, targeted removal, sweepers). Each has a "Why" line. It only suggests; "Pencil in…" asks which card to cut and adds a pencilled swap.
@@ -171,6 +171,7 @@ GitHub pauses scheduled jobs in a repository nothing has happened in for about t
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Approve button removed (29 Oct 2026):** a swap now goes straight from pencilled to **I made it**, then **Mark done**. Swaps that were already approved still work.
 - **Export with all pending swaps (28 Oct 2026):** on a deck page, **Export with all pending swaps (N)** gives the text list with every pencilled, approved and made swap applied, so you can try the list in Forge before the physical swaps. Only swaps with both a cut and an incoming card are included; the page says how many were left out. Swaps marked done, dropped or on hold are not applied (done ones are already in the list).
 - **Tick boxes and Your list on the Wishlist (25 Oct 2026):** every wishlist card has a tick box on its left. A **Your list** box at the top shows just the ticked card names as a plain list, with **Copy list** to copy them one per line and **Clear ticks** to start again. Ticks are remembered on that device only.
 - **Last CSV name and upload time (19 Oct 2026):** the Data tab now shows the file name of the last collection CSV (for example `ManaBox_Collection 20261018.csv`) and the date and time it was uploaded. The Collection line on the binders view and the status bar use the same name.
