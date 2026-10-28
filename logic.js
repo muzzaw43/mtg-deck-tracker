@@ -205,6 +205,7 @@
     const m = deckMap(deck, idx);
     for (const p of activePencils(deck)) {
       if (only && !only.includes(pencilStatus(p))) continue;
+      if (opts && opts.complete && !(p.out && p.in)) continue; // needs both a cut and an incoming card
       if (isReflected(deck, p, idx, base)) continue;
       if (p.out) {
         const k = keyOf(idx, p.out), e = m.get(k);

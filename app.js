@@ -1217,14 +1217,16 @@
     const outKeys = new Set(pens.filter((p) => p.out).map((p) => M.keyOf(S.idx, p.out)));
     const cmds = M.commandersOf(d), ck = cmds.length ? M.keyOf(S.idx, cmds[0]) : "";
     const nMade = pens.filter((p) => M.pencilStatus(p) === "made").length, nPen = pens.length - nMade;
+    const pendAll = pens.filter((p) => ["pencilled", "approved", "made"].includes(M.pencilStatus(p))), allPend = pendAll.filter((p) => p.out && p.in), skipPend = pendAll.length - allPend.length;
     let h = `<button class="back" data-act="back">← All decks</button>
       <div class="hero">${ck ? artImg(ck, cmds[0], d, "art_crop", "heroimg") : ""}<div class="heroin"><div class="herot">${esc(d.name || d.slug)}</div>
       <div class="herom">${esc(cmds.join(" + "))}</div>
       <div class="herom">${esc(d.status || "planned")} · ${M.deckTotal(m)} cards${S.rows.length && M.deckValue(S.rows, d) ? ` · worth about $${M.deckValue(S.rows, d).toFixed(0)} AUD` : ""}${nMade ? ` · ${nMade} made by hand` : ""}${nPen ? ` · ${nPen} pencilled` : ""}${d.updated ? " · updated " + esc(d.updated) : ""}</div></div></div>
       <div>${S.guides && S.guides.has(d.slug) ? `<button class="btn" data-act="guide" data-slug="${esc(d.slug)}">Strategy guide</button>` : ""}<button class="btn" data-act="stats">${S.statsOpen ? "Hide stats" : "Deck stats"}</button><button class="btn" data-act="upg">${S.upgOpen ? "Hide upgrades" : "Upgrade finder"}</button><button class="btn" data-act="tkopen" data-slug="${esc(d.slug)}">Check deck</button><button class="btn" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="current">Export list</button>
       ${pens.some((p) => M.pencilStatus(p) === "made") ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="physical">Export list as it is physically</button>` : ""}
-      ${pens.some((p) => ["approved", "made"].includes(M.pencilStatus(p))) ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with confirmed changes</button>` : ""}</div>
-      ${pens.some((p) => M.pencilStatus(p) === "pencilled") ? `<div class="muted">Pencilled swaps aren't in any export until you approve them.</div>` : ""}`;
+      ${pens.some((p) => ["approved", "made"].includes(M.pencilStatus(p))) ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="swaps">Export with confirmed changes</button>` : ""}
+      ${allPend.length ? `<button class="btn alt" data-act="exportdeck" data-slug="${esc(d.slug)}" data-mode="all">Export with all pending swaps (${allPend.length})</button>` : ""}</div>
+      ${pens.some((p) => M.pencilStatus(p) === "pencilled") ? `<div class="muted">Pencilled swaps are only in "Export with all pending swaps" until you approve them.${skipPend ? ` ${skipPend} pending swap${skipPend > 1 ? "s" : ""} left out of that export (no cut or no incoming card chosen yet).` : ""}</div>` : ""}`;
     const pre = h + (S.statsOpen ? statsPanel(d) : "") + (S.upgOpen ? upgradePanel(d) : ""); h = "";
     h += sleeveBox(d);
     const is = issuesFor(d.slug);
@@ -2059,8 +2061,8 @@
     else if (a === "exportdeck") {
       const d = deckBySlug(el.dataset.slug);
       const mode = el.dataset.mode;
-      const list = mode === "swaps" ? M.applySwaps(d, S.idx, { only: ["approved", "made"] }) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
-      const label = { swaps: " — with confirmed changes", physical: " — as it is physically", current: " — list in ManaBox" }[mode];
+      const list = mode === "all" ? M.applySwaps(d, S.idx, { only: ["pencilled", "approved", "made"], complete: true }) : mode === "swaps" ? M.applySwaps(d, S.idx, { only: ["approved", "made"] }) : mode === "physical" ? M.applySwaps(d, S.idx, { only: ["made"] }) : [...M.deckMap(d, S.idx).values()];
+      const label = { all: " — with all pending swaps", swaps: " — with confirmed changes", physical: " — as it is physically", current: " — list in ManaBox" }[mode];
       showOut((d.name || d.slug) + label, M.deckText(sortCards(d, list)), d.slug + (mode === "current" ? "" : "_" + mode) + ".txt");
     }
     else if (a === "tradecsv" || a === "tradetext") {

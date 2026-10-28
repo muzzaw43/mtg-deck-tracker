@@ -171,6 +171,7 @@ GitHub pauses scheduled jobs in a repository nothing has happened in for about t
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Export with all pending swaps (28 Oct 2026):** on a deck page, **Export with all pending swaps (N)** gives the text list with every pencilled, approved and made swap applied, so you can try the list in Forge before the physical swaps. Only swaps with both a cut and an incoming card are included; the page says how many were left out. Swaps marked done, dropped or on hold are not applied (done ones are already in the list).
 - **Tick boxes and Your list on the Wishlist (25 Oct 2026):** every wishlist card has a tick box on its left. A **Your list** box at the top shows just the ticked card names as a plain list, with **Copy list** to copy them one per line and **Clear ticks** to start again. Ticks are remembered on that device only.
 - **Last CSV name and upload time (19 Oct 2026):** the Data tab now shows the file name of the last collection CSV (for example `ManaBox_Collection 20261018.csv`) and the date and time it was uploaded. The Collection line on the binders view and the status bar use the same name.
 - **No Copy ManaBox List button in the app's guide viewer (18 Oct 2026):** the strategy guides opened inside the app no longer show the Copy ManaBox List button.
