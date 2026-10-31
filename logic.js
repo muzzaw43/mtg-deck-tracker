@@ -180,11 +180,23 @@
   // Does the ManaBox list already show this swap (OUT gone and IN present)? Works for any status.
   // A basic land going OUT can't be proven gone (other copies stay in the deck), so only the IN card is checked.
   // An IN card that a later made/done swap in the same deck took back out (A -> B, then B -> C) counts as seen.
-  function swapOutGone(deck, p, idx, m) { return !p.out || isBasic(p.out) || !m.has(keyOf(idx, p.out)); }
+  // A later swap that is itself visible in the list (its OUT gone, its IN there) can explain why this swap's cards look
+  // "wrong": A -> B, then B -> A (or B -> C). Only swaps after this one in the list count, and dropped ones never do.
+  function laterShownSwap(deck, p, idx, m, test) {
+    const all = deck.pencilled || [], at = all.indexOf(p);
+    return all.some((q, i) => i > at && q !== p && norm(q.status || "pencilled") !== "dropped" && test(q)
+      && (!q.out || isBasic(q.out) || !m.has(keyOf(idx, q.out))) && (!q.in || m.has(keyOf(idx, q.in))));
+  }
+  function swapOutGone(deck, p, idx, m) {
+    if (!p.out || isBasic(p.out) || !m.has(keyOf(idx, p.out))) return true;
+    const k = keyOf(idx, p.out);
+    return laterShownSwap(deck, p, idx, m, (q) => q.in && keyOf(idx, q.in) === k); // swapped back in later
+  }
   function swapInThere(deck, p, idx, m) {
     if (!p.in || m.has(keyOf(idx, p.in))) return true;
     const k = keyOf(idx, p.in);
-    return (deck.pencilled || []).some((q) => q !== p && q.out && ["made", "done"].includes(norm(q.status || "")) && keyOf(idx, q.out) === k);
+    return (deck.pencilled || []).some((q) => q !== p && q.out && ["made", "done"].includes(norm(q.status || "")) && keyOf(idx, q.out) === k)
+      || laterShownSwap(deck, p, idx, m, (q) => q.out && keyOf(idx, q.out) === k); // swapped out again later
   }
   function swapShown(deck, p, idx, m) {
     m = m || deckMap(deck, idx);
