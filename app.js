@@ -104,7 +104,7 @@
       return;
     }
     const t = S.nav.pop();
-    if (t === "modal") { S.zoom = null; S.ch = null; }
+    if (t === "modal") { S.zoom = null; S.zoomList = null; S.ch = null; }
     else if (t === "deck") S.deck = null;
     else if (t === "guide") { removeGuide(); }
     else if (t === "tick") { S.tk = null; }
@@ -1396,6 +1396,23 @@
       <input type="text" id="chq" placeholder="${c.mode === "in" ? "Search card names…" : "Filter this deck…"}" autocomplete="off" value="${esc(c.q || "")}" style="margin:8px 0">
       <div class="muted">Hover a card to preview it. On a phone, press and hold.</div><div id="chres">${chooserResults()}</div>${c.pendIn ? `<button class="btn alt" data-act="choosenone">Decide the cut later</button>` : ""}</div></div>`;
   }
+  // Swipe / arrow keys / Prev-Next move through the cards of the list the tapped card sat in (a deck's cards, a collection page, a set).
+  function zoomSiblings(el) {
+    const box = el.closest(".stacks,.gridv,.colgrid") || el.parentElement;
+    if (!box) return null;
+    const nodes = [...box.querySelectorAll('[data-act="zoom"]')], i = nodes.indexOf(el);
+    if (nodes.length < 2 || i < 0) return null;
+    return { i, items: nodes.map((n) => ({ key: n.dataset.key, slug: n.dataset.slug, sid: n.dataset.sid || "", name: n.dataset.name || "" })) };
+  }
+  function zoomStep(dir) {
+    const L = S.zoomList; if (!S.zoom || S.ch || !L) return;
+    const j = L.i + dir; if (j < 0 || j >= L.items.length) return;
+    L.i = j; S.zoom = { ...L.items[j] }; S.tlMsg = ""; render();
+  }
+  function zoomNav() {
+    const L = S.zoomList; if (!S.zoom || !L) return "";
+    return `<div class="row znav"><button class="btn alt" data-act="zprev" ${L.i <= 0 ? "disabled" : ""}>&#8249; Prev</button><span class="muted">${L.i + 1} / ${L.items.length} · swipe</span><button class="btn alt" data-act="znext" ${L.i >= L.items.length - 1 ? "disabled" : ""}>Next &#8250;</button></div>`;
+  }
   function zoomModal() {
     if (!S.zoom) return "";
     const d = deckBySlug(S.zoom.slug), k = S.zoom.key, info = M.cardInfo(S.idx, k), name = info ? info.name : k.replace(/^\?/, "");
@@ -1408,7 +1425,7 @@
     const onTl = o && tlCards().some((c) => norm(c.name) === norm(o.name));
     const tlbox = S.wtoken && o ? `<div style="margin-top:6px"><button class="btn alt" data-act="tladd" data-key="${esc(k)}">${onTl ? "Add one more to guest trade list" : "Add to guest trade list"}</button>${onTl ? `<button class="btn alt" data-act="tldel" data-key="${esc(k)}">Remove from guest trade list</button>` : ""}</div>${S.tlMsg ? `<div class="muted">${esc(S.tlMsg)}</div>` : ""}` : "";
     const wlbox = S.wtoken ? `<div class="muted" style="margin-top:6px">${wl ? "On the wishlist" + ((wl.decks || []).length ? " for " + esc(wl.decks.map((s2) => (deckBySlug(s2) || { name: s2 }).name || s2).join(", ")) : "") + ". " : ""}Add to wishlist for:</div><div class="row"><select id="wldeck"><option value="">no particular deck</option>${S.decks.map((x) => `<option value="${esc(x.slug)}" ${d && d.slug === x.slug ? "selected" : ""}>${esc(x.name || x.slug)}</option>`).join("")}</select><button class="btn" data-act="wladd" data-name="${esc(nmz)}">Add</button></div>` : "";
-    return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${zi}${oracleBox(info, k)}${copies}
+    return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${zoomNav()}${zi}${oracleBox(info, k)}${copies}
       ${where}${wlbox}${tlbox}<div id="rulings" class="rul" data-sid="${esc(pr || "")}"></div>
       <div>${ownPill(k, true)} ${o ? `<span class="muted">${[...o.binders].map(([b, q]) => esc(b) + " ×" + q).join(", ")}</span>` : ""}</div>
       ${info && d && !/\bLand\b/.test(info.frontType) ? `<div class="muted" style="margin-top:6px">Counts as (for ${esc(d.name || d.slug)}):</div><div class="chips">${M.ROLE_KEYS.map((r) => `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="${r}" class="${effRoles(d, k).includes(r) ? "on" : softRole(d, k, r) ? "maybe" : ""}">${{ ramp: "Ramp", draw: "Card advantage", targeted: "Targeted", mass: "Mass" }[r]}</button>`).join("")}${d.roles && d.roles[k] ? `<button data-act="role" data-slug="${esc(d.slug)}" data-key="${esc(k)}" data-r="auto">Reset to auto</button>` : ""}</div>` : ""}
@@ -1864,7 +1881,7 @@
   function guestZoom() {
     if (!S.zoom) return "";
     const k = S.zoom.key, info = M.cardInfo(S.idx, k), name = info ? info.name : k.replace(/^\?/, ""), d = deckBySlug(S.zoom.slug);
-    return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${S.zoom.sid ? `<img class="zimg" alt="" src="${esc(M.artUrl(S.zoom.sid, "normal"))}" data-fb="${esc(M.artByName(name, "normal"))}">` : artImg(k, name, d, "normal", "zimg")}${oracleBox(info, k)}<button class="btn" data-act="closezoom">Close</button></div></div>`;
+    return `<div class="modal" data-act="closezoom"><div class="mbox" data-act="noop">${zoomNav()}${S.zoom.sid ? `<img class="zimg" alt="" src="${esc(M.artUrl(S.zoom.sid, "normal"))}" data-fb="${esc(M.artByName(name, "normal"))}">` : artImg(k, name, d, "normal", "zimg")}${oracleBox(info, k)}<button class="btn" data-act="closezoom">Close</button></div></div>`;
   }
   /* ---------- Share: QR codes ---------- */
   function qrSvg(text) {
@@ -1977,6 +1994,22 @@
   const touchEnd = () => { clearTimeout(holdTimer); if (holdShown) { S.noClickUntil = Date.now() + 600; peekHide(); holdShown = false; } };
   document.addEventListener("touchend", touchEnd);
   document.addEventListener("touchcancel", touchEnd);
+  // Swipe left/right on the card pop-up to move to the next/previous card in the list it was opened from.
+  let swXY = null;
+  document.addEventListener("touchstart", (ev) => {
+    swXY = null;
+    if (!S.zoom || S.ch || !S.zoomList || ev.touches.length !== 1 || !ev.target.closest || !ev.target.closest(".modal .mbox") || ev.target.closest("input,textarea,select")) return;
+    swXY = [ev.touches[0].clientX, ev.touches[0].clientY];
+  }, { passive: true });
+  document.addEventListener("touchend", (ev) => {
+    if (!swXY) return;
+    const p = ev.changedTouches[0], dx = p.clientX - swXY[0], dy = p.clientY - swXY[1]; swXY = null;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > 1.6 * Math.abs(dy)) zoomStep(dx < 0 ? 1 : -1);
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (!S.zoom || S.ch || !S.zoomList || ev.altKey || ev.ctrlKey || ev.metaKey || (ev.target.matches && ev.target.matches("input,textarea,select"))) return;
+    if (ev.key === "ArrowRight") { ev.preventDefault(); zoomStep(1); } else if (ev.key === "ArrowLeft") { ev.preventDefault(); zoomStep(-1); }
+  });
   document.addEventListener("contextmenu", (ev) => { if (ev.target.closest && ev.target.closest("[data-peek],.ac,.sc,.mbox,.hero,.tile") && (!canHover || Date.now() - (S.lastTouch || 0) < 1500)) ev.preventDefault(); });
   document.addEventListener("error", (ev) => {
     const i = ev.target;
@@ -2190,8 +2223,10 @@
     else if (a === "colclear") { const f = CF(); Object.assign(f, { q: "", colors: new Set(), ci: new Set(), ciDeck: "", mv: new Set(), types: new Set(), rarity: new Set(), set: "", binder: "", foil: "", limit: 120 }); render(); }
     else if (a === "colchip") { const f = CF(), s = f[el.dataset.f], v = el.dataset.f === "mv" ? +el.dataset.v : el.dataset.v; if (s.has(v)) s.delete(v); else s.add(v); if (el.dataset.f === "ci") f.ciDeck = ""; f.limit = 120; render(); }
     else if (a === "dview") { S.dview = el.dataset.v; try { localStorage.setItem("mtg_dview", S.dview); } catch (e) { /* ignore */ } render(); }
-    else if (a === "zoom") { openModalNav(); S.zoom = { key: el.dataset.key, slug: el.dataset.slug, sid: el.dataset.sid || "", name: el.dataset.name || "" }; render(); }
-    else if (a === "closezoom") { S.zoom = null; popNav("modal"); render(); }
+    else if (a === "zoom") { openModalNav(); S.zoom = { key: el.dataset.key, slug: el.dataset.slug, sid: el.dataset.sid || "", name: el.dataset.name || "" }; S.zoomList = zoomSiblings(el); render(); }
+    else if (a === "zprev") zoomStep(-1);
+    else if (a === "znext") zoomStep(1);
+    else if (a === "closezoom") { S.zoom = null; S.zoomList = null; popNav("modal"); render(); }
     else if (a === "noop") { /* keep modal open */ }
     else if (a === "addswap") addSwap(el.dataset.slug);
     else if (a === "rebuildcsv" || a === "rebuildtext") {

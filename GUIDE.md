@@ -171,6 +171,7 @@ GitHub pauses scheduled jobs in a repository nothing has happened in for about t
 ## What's new
 Newest first. Each time the app gains a feature this list and the sections above are updated.
 
+- **Swipe through cards (9 Nov 2026):** open any card from a deck, the collection or a set (including cards you don't own) and swipe left for the next card or right for the previous one. There are also **Prev** and **Next** buttons, and the left and right arrow keys on a computer. It moves through the list the card was in, as shown on screen (on the collection, only the cards loaded so far; tap **Show more** first to go further).
 - **No false warnings when a swap is undone later (31 Oct 2026):** if you swap A for B and later swap B back for A (or B for C), the older swap no longer shows "Marked done, but the collection CSV doesn't show it". The app now looks at the later swaps in the same deck to explain it. A swap that really isn't in the list still gets the warning.
 - **Approve button removed (29 Oct 2026):** a swap now goes straight from pencilled to **I made it**, then **Mark done**. Swaps that were already approved still work.
 - **Export with all pending swaps (28 Oct 2026):** on a deck page, **Export with all pending swaps (N)** gives the text list with every pencilled, approved and made swap applied, so you can try the list in Forge before the physical swaps. Only swaps with both a cut and an incoming card are included; the page says how many were left out. Swaps marked done, dropped or on hold are not applied (done ones are already in the list).
